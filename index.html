@@ -606,19 +606,25 @@
       data.categories.forEach((cat) => {
         cat.products.forEach((prod) => {
           const counts = data.sales[prod.id] || { cash: 0, qr: 0 };
+          const cashSum = counts.cash * prod.price;
+          const qrSum = counts.qr * prod.price;
           const totalCount = counts.cash + counts.qr;
-          const totalSum = totalCount * prod.price;
+          const totalSum = cashSum + qrSum;
           productRows.push({
             category: cat.name,
             name: prod.name,
             price: prod.price,
-            count: totalCount,
-            sum: totalSum,
+            cashCount: counts.cash,
+            qrCount: counts.qr,
+            totalCount,
+            cashSum,
+            qrSum,
+            totalSum,
           });
 
           categoryTotals[cat.name] = (categoryTotals[cat.name] || 0) + totalSum;
-          cashTotal += counts.cash * prod.price;
-          qrTotal += counts.qr * prod.price;
+          cashTotal += cashSum;
+          qrTotal += qrSum;
         });
       });
 
@@ -641,8 +647,12 @@
             <th>Категория</th>
             <th>Товар</th>
             <th>Цена</th>
-            <th>Кол-во</th>
-            <th>Сумма</th>
+            <th>Нал (шт)</th>
+            <th>QR (шт)</th>
+            <th>Всего</th>
+            <th>Нал</th>
+            <th>QR</th>
+            <th>Итого</th>
           </tr>
         </thead>
         <tbody>
@@ -653,8 +663,12 @@
                 <td>${r.category}</td>
                 <td>${r.name}</td>
                 <td>${formatCurrency(r.price)}</td>
-                <td>${r.count}</td>
-                <td>${formatCurrency(r.sum)}</td>
+                <td>${r.cashCount}</td>
+                <td>${r.qrCount}</td>
+                <td>${r.totalCount}</td>
+                <td>${formatCurrency(r.cashSum)}</td>
+                <td>${formatCurrency(r.qrSum)}</td>
+                <td>${formatCurrency(r.totalSum)}</td>
               </tr>`
             )
             .join('')}
@@ -703,9 +717,9 @@
       const now = new Date();
       lines.push(`Отчёт,${now.toLocaleString('ru-RU')}`);
       lines.push('---');
-      lines.push('Категория,Товар,Цена,Количество,Сумма');
+      lines.push('Категория,Товар,Цена,Нал (шт),QR (шт),Всего (шт),Нал (сумма),QR (сумма),Итого');
       productRows.forEach((r) => {
-        lines.push(`${r.category},${r.name},${r.price},${r.count},${r.sum}`);
+        lines.push(`${r.category},${r.name},${r.price},${r.cashCount},${r.qrCount},${r.totalCount},${r.cashSum},${r.qrSum},${r.totalSum}`);
       });
       lines.push('---');
       lines.push('Итоги по категориям');
