@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Учёт продаж церковной лавки</title>
+  <style>
+    :root {
+      --bg: #f5f5f5;
+      --card: #ffffff;
+      --primary: #2d6a4f;
+      --accent: #40916c;
+      --danger: #d00000;
+      --text: #1c1c1c;
+      --muted: #666;
+      --border: #dcdcdc;
+      --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      background: var(--primary);
+      color: #fff;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    header h1 {
+      font-size: 18px;
+      margin: 0;
+    }
+
+    .nav-buttons {
+      display: flex;
+      gap: 8px;
+    }
+
+    .nav-buttons button {
+      background: #fff;
+      color: var(--primary);
+      border: none;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 14px;
+      min-width: 80px;
+      box-shadow: var(--shadow);
+    }
+
+    main {
+      padding: 12px;
+    }
+
+    .screen {
+      display: none;
+    }
+
+    .screen.active {
+      display: block;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+    }
+
+    .category-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .category-row h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 16px;
+      cursor: pointer;
+      min-height: 44px;
+      transition: transform 0.05s ease;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .btn-accent {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--primary);
+      border: 1px solid var(--primary);
+    }
+
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 10px;
+    }
+
+    .product-button {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      min-height: 90px;
+      text-align: left;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 15px;
+    }
+
+    .product-button strong {
+      font-size: 17px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .tab {
+      padding: 10px 14px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 15px;
+      white-space: nowrap;
+      box-shadow: var(--shadow);
+    }
+
+    .tab.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .form-inline {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    input, select {
+      padding: 10px 12px;
+      font-size: 16px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      flex: 1;
+      min-width: 140px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th, td {
+      padding: 8px 6px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+
+    th {
+      background: #f1f1f1;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal {
+      background: #fff;
+      padding: 16px;
+      border-radius: 14px;
+      width: min(420px, 90vw);
+      box-shadow: var(--shadow);
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--primary);
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      display: none;
+      z-index: 30;
+    }
+
+    .toast.show {
+      display: block;
+    }
+
+    @media (max-width: 480px) {
+      header h1 { font-size: 16px; }
+      .product-button { min-height: 80px; }
+      .nav-buttons button { padding: 8px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Учёт продаж</h1>
+    <div class="nav-buttons">
+      <button id="nav-sales">Продажи</button>
+      <button id="nav-settings">Настройки</button>
+      <button id="nav-report">Итоги</button>
+    </div>
+  </header>
+  <main>
+    <!-- Экран продаж -->
+    <section id="screen-sales" class="screen active">
+      <div class="card">
+        <div class="tabs" id="category-tabs"></div>
+        <div class="product-grid" id="product-grid"></div>
+      </div>
+    </section>
+
+    <!-- Экран настроек -->
+    <section id="screen-settings" class="screen">
+      <div class="card">
+        <h2>Категории</h2>
+        <div id="category-list"></div>
+        <div class="form-inline" style="margin-top:12px;">
+          <input type="text" id="new-category-name" placeholder="Новая категория" />
+          <button class="btn btn-primary" id="add-category-btn">Добавить</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Экран отчёта -->
+    <section id="screen-report" class="screen">
+      <div class="card">
+        <div class="actions" style="margin-bottom:10px;">
+          <button class="btn btn-primary" id="download-report">Сохранить итоги</button>
+          <button class="btn btn-danger" id="reset-shift">Сбросить смену</button>
+        </div>
+        <div id="report-summary"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-overlay" id="payment-modal">
+    <div class="modal">
+      <h3 id="payment-title">Оплата</h3>
+      <p class="muted" id="payment-subtitle"></p>
+      <div class="actions" style="margin-top:12px;">
+        <button class="btn btn-primary" id="pay-cash">Наличные</button>
+        <button class="btn btn-accent" id="pay-qr">QR-код</button>
+        <button class="btn btn-ghost" id="pay-cancel">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // Основные структуры данных
+    const STORAGE_KEY = 'churchShopDataV1';
+    let data = null;
+    let currentCategoryId = null;
+    let pendingProductId = null;
+
+    function defaultData() {
+      return {
+        categories: [
+          {
+            id: 'cat-1',
+            name: 'Свечки',
+            products: [
+              { id: 'p-1', name: 'Свеча 100', price: 100 },
+              { id: 'p-2', name: 'Свеча 200', price: 200 },
+              { id: 'p-3', name: 'Свеча 500', price: 500 },
+            ],
+          },
+          {
+            id: 'cat-2',
+            name: 'Иконы',
+            products: [
+              { id: 'p-4', name: 'Икона 200', price: 200 },
+              { id: 'p-5', name: 'Икона 400', price: 400 },
+              { id: 'p-6', name: 'Икона 500', price: 500 },
+            ],
+          },
+        ],
+        sales: {}, // ключ productId: {cash: number, qr: number}
+      };
+    }
+
+    // Работа с localStorage
+    function loadData() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          data = JSON.parse(raw);
+        } else {
+          data = defaultData();
+          saveData();
+        }
+      } catch (e) {
+        console.error('Ошибка чтения данных', e);
+        data = defaultData();
+      }
+      if (!data.sales) data.sales = {};
+    }
+
+    function saveData() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+
+    function showScreen(id) {
+      document.querySelectorAll('.screen').forEach((el) => el.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+      if (id === 'screen-report') renderReport();
+      if (id === 'screen-sales') renderSales();
+      if (id === 'screen-settings') renderSettings();
+    }
+
+    // Вспомогательные функции
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1800);
+    }
+
+    function formatCurrency(num) {
+      return new Intl.NumberFormat('ru-RU').format(num) + ' ₽';
+    }
+
+    function findProduct(productId) {
+      for (const cat of data.categories) {
+        const prod = cat.products.find((p) => p.id === productId);
+        if (prod) return { product: prod, category: cat };
+      }
+      return null;
+    }
+
+    // Экран продаж
+    function renderSales() {
+      const tabs = document.getElementById('category-tabs');
+      const grid = document.getElementById('product-grid');
+      tabs.innerHTML = '';
+      grid.innerHTML = '';
+
+      if (!currentCategoryId && data.categories.length) {
+        currentCategoryId = data.categories[0].id;
+      }
+
+      data.categories.forEach((cat) => {
+        const tab = document.createElement('button');
+        tab.className = 'tab' + (cat.id === currentCategoryId ? ' active' : '');
+        tab.textContent = cat.name;
+        tab.onclick = () => {
+          currentCategoryId = cat.id;
+          renderSales();
+        };
+        tabs.appendChild(tab);
+      });
+
+      const category = data.categories.find((c) => c.id === currentCategoryId);
+      const products = category ? category.products : [];
+
+      products.forEach((prod) => {
+        const btn = document.createElement('button');
+        btn.className = 'product-button';
+        btn.innerHTML = `<strong>${prod.name}</strong><span class="muted">${category.name}</span><span>${formatCurrency(prod.price)}</span>`;
+        btn.onclick = () => openPaymentModal(prod.id);
+
+        const counts = data.sales[prod.id] || { cash: 0, qr: 0 };
+        const totalCount = counts.cash + counts.qr;
+        if (totalCount > 0) {
+          const info = document.createElement('div');
+          info.className = 'muted';
+          info.textContent = `Продано: ${totalCount}`;
+          btn.appendChild(info);
+        }
+        grid.appendChild(btn);
+      });
+    }
+
+    function openPaymentModal(productId) {
+      pendingProductId = productId;
+      const found = findProduct(productId);
+      if (!found) return;
+      document.getElementById('payment-title').textContent = found.product.name;
+      document.getElementById('payment-subtitle').textContent = `${found.category.name} · ${formatCurrency(found.product.price)}`;
+      document.getElementById('payment-modal').classList.add('active');
+    }
+
+    function closePaymentModal() {
+      document.getElementById('payment-modal').classList.remove('active');
+      pendingProductId = null;
+    }
+
+    function registerSale(method) {
+      if (!pendingProductId) return;
+      const entry = data.sales[pendingProductId] || { cash: 0, qr: 0 };
+      if (method === 'cash') entry.cash += 1;
+      if (method === 'qr') entry.qr += 1;
+      data.sales[pendingProductId] = entry;
+      saveData();
+      closePaymentModal();
+      renderSales();
+      showToast('Продажа записана');
+    }
+
+    // Экран настроек
+    function renderSettings() {
+      const list = document.getElementById('category-list');
+      list.innerHTML = '';
+
+      data.categories.forEach((cat) => {
+        const block = document.createElement('div');
+        block.className = 'card';
+
+        const header = document.createElement('div');
+        header.className = 'category-row';
+        const title = document.createElement('h3');
+        title.textContent = cat.name;
+
+        const actions = document.createElement('div');
+        const renameBtn = document.createElement('button');
+        renameBtn.className = 'btn btn-ghost';
+        renameBtn.textContent = 'Переименовать';
+        renameBtn.onclick = () => {
+          const newName = prompt('Новое название категории', cat.name);
+          if (newName && newName.trim()) {
+            cat.name = newName.trim();
+            saveData();
+            renderSettings();
+            renderSales();
+          }
+        };
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn btn-danger';
+        deleteBtn.textContent = 'Удалить';
+        deleteBtn.onclick = () => {
+          const ok = confirm('Удалить категорию и все товары?');
+          if (!ok) return;
+          data.categories = data.categories.filter((c) => c.id !== cat.id);
+          cat.products.forEach((p) => delete data.sales[p.id]);
+          if (currentCategoryId === cat.id) currentCategoryId = data.categories[0]?.id || null;
+          saveData();
+          renderSettings();
+          renderSales();
+        };
+        actions.append(renameBtn, deleteBtn);
+
+        header.append(title, actions);
+        block.appendChild(header);
+
+        const productsWrap = document.createElement('div');
+        cat.products.forEach((prod) => {
+          const row = document.createElement('div');
+          row.className = 'category-row';
+          const info = document.createElement('div');
+          info.innerHTML = `<strong>${prod.name}</strong><div class="muted">${formatCurrency(prod.price)}</div>`;
+
+          const btns = document.createElement('div');
+          const editBtn = document.createElement('button');
+          editBtn.className = 'btn btn-ghost';
+          editBtn.textContent = 'Изменить';
+          editBtn.onclick = () => {
+            const newName = prompt('Название товара', prod.name);
+            if (!newName) return;
+            const newPrice = prompt('Цена, руб', prod.price);
+            if (!newPrice || isNaN(newPrice)) return alert('Введите число');
+            prod.name = newName.trim();
+            prod.price = parseInt(newPrice, 10);
+            saveData();
+            renderSettings();
+            renderSales();
+          };
+
+          const delBtn = document.createElement('button');
+          delBtn.className = 'btn btn-danger';
+          delBtn.textContent = 'Удалить';
+          delBtn.onclick = () => {
+            const ok = confirm('Удалить товар?');
+            if (!ok) return;
+            cat.products = cat.products.filter((p) => p.id !== prod.id);
+            delete data.sales[prod.id];
+            saveData();
+            renderSettings();
+            renderSales();
+          };
+          btns.append(editBtn, delBtn);
+          row.append(info, btns);
+          productsWrap.appendChild(row);
+        });
+        block.appendChild(productsWrap);
+
+        const form = document.createElement('div');
+        form.className = 'form-inline';
+        form.innerHTML = `
+          <input type="text" placeholder="Новый товар" data-cat="${cat.id}" class="prod-name" />
+          <input type="number" placeholder="Цена" data-cat="${cat.id}" class="prod-price" />
+          <button class="btn btn-primary" data-cat="${cat.id}">Добавить</button>
+        `;
+        const addBtn = form.querySelector('button');
+        addBtn.onclick = () => {
+          const nameInput = form.querySelector('.prod-name');
+          const priceInput = form.querySelector('.prod-price');
+          const name = nameInput.value.trim();
+          const price = parseInt(priceInput.value, 10);
+          if (!name) return alert('Введите название');
+          if (isNaN(price) || price <= 0) return alert('Введите цену в рублях');
+          const newProd = { id: 'p-' + Date.now(), name, price };
+          cat.products.push(newProd);
+          saveData();
+          nameInput.value = '';
+          priceInput.value = '';
+          renderSettings();
+          renderSales();
+        };
+
+        block.appendChild(form);
+        list.appendChild(block);
+      });
+    }
+
+    // Итоги
+    function computeReport() {
+      const productRows = [];
+      const categoryTotals = {};
+      let cashTotal = 0;
+      let qrTotal = 0;
+
+      data.categories.forEach((cat) => {
+        cat.products.forEach((prod) => {
+          const counts = data.sales[prod.id] || { cash: 0, qr: 0 };
+          const totalCount = counts.cash + counts.qr;
+          const totalSum = totalCount * prod.price;
+          productRows.push({
+            category: cat.name,
+            name: prod.name,
+            price: prod.price,
+            count: totalCount,
+            sum: totalSum,
+          });
+
+          categoryTotals[cat.name] = (categoryTotals[cat.name] || 0) + totalSum;
+          cashTotal += counts.cash * prod.price;
+          qrTotal += counts.qr * prod.price;
+        });
+      });
+
+      const grandTotal = cashTotal + qrTotal;
+      return { productRows, categoryTotals, cashTotal, qrTotal, grandTotal };
+    }
+
+    function renderReport() {
+      const { productRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
+      const container = document.getElementById('report-summary');
+      container.innerHTML = '';
+
+      const itemsCard = document.createElement('div');
+      itemsCard.className = 'card';
+      itemsCard.innerHTML = '<h3>По товарам</h3>';
+      const table = document.createElement('table');
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Категория</th>
+            <th>Товар</th>
+            <th>Цена</th>
+            <th>Кол-во</th>
+            <th>Сумма</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${productRows
+            .map(
+              (r) => `
+              <tr>
+                <td>${r.category}</td>
+                <td>${r.name}</td>
+                <td>${formatCurrency(r.price)}</td>
+                <td>${r.count}</td>
+                <td>${formatCurrency(r.sum)}</td>
+              </tr>`
+            )
+            .join('')}
+        </tbody>`;
+      itemsCard.appendChild(table);
+      container.appendChild(itemsCard);
+
+      const catCard = document.createElement('div');
+      catCard.className = 'card';
+      catCard.innerHTML = '<h3>По категориям</h3>';
+      const catList = document.createElement('div');
+      for (const [name, sum] of Object.entries(categoryTotals)) {
+        const row = document.createElement('div');
+        row.className = 'category-row';
+        row.innerHTML = `<span>${name}</span><strong>${formatCurrency(sum)}</strong>`;
+        catList.appendChild(row);
+      }
+      catCard.appendChild(catList);
+      container.appendChild(catCard);
+
+      const totalsCard = document.createElement('div');
+      totalsCard.className = 'card';
+      totalsCard.innerHTML = `
+        <h3>Оплаты</h3>
+        <div class="category-row"><span>Наличные</span><strong>${formatCurrency(cashTotal)}</strong></div>
+        <div class="category-row"><span>QR-код</span><strong>${formatCurrency(qrTotal)}</strong></div>
+        <hr style="border:0;border-top:1px solid var(--border);margin:10px 0;" />
+        <div class="category-row"><span>Итого</span><strong>${formatCurrency(grandTotal)}</strong></div>
+      `;
+      container.appendChild(totalsCard);
+    }
+
+    function resetShift() {
+      const ok = confirm('Сбросить все продажи за смену?');
+      if (!ok) return;
+      data.sales = {};
+      saveData();
+      renderReport();
+      renderSales();
+      showToast('Смена сброшена');
+    }
+
+    function downloadReport() {
+      const { productRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
+      const lines = [];
+      const now = new Date();
+      lines.push(`Отчёт,${now.toLocaleString('ru-RU')}`);
+      lines.push('---');
+      lines.push('Категория,Товар,Цена,Количество,Сумма');
+      productRows.forEach((r) => {
+        lines.push(`${r.category},${r.name},${r.price},${r.count},${r.sum}`);
+      });
+      lines.push('---');
+      lines.push('Итоги по категориям');
+      Object.entries(categoryTotals).forEach(([name, sum]) => {
+        lines.push(`${name},${sum}`);
+      });
+      lines.push('---');
+      lines.push(`Наличные,${cashTotal}`);
+      lines.push(`QR-код,${qrTotal}`);
+      lines.push(`Итого,${grandTotal}`);
+
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const fileName = `otchet-${now.toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Отчёт сохранён');
+    }
+
+    // Навигация
+    document.getElementById('nav-sales').onclick = () => showScreen('screen-sales');
+    document.getElementById('nav-settings').onclick = () => showScreen('screen-settings');
+    document.getElementById('nav-report').onclick = () => showScreen('screen-report');
+
+    // Модал оплаты
+    document.getElementById('pay-cash').onclick = () => registerSale('cash');
+    document.getElementById('pay-qr').onclick = () => registerSale('qr');
+    document.getElementById('pay-cancel').onclick = closePaymentModal;
+    document.getElementById('payment-modal').onclick = (e) => {
+      if (e.target.id === 'payment-modal') closePaymentModal();
+    };
+
+    // Настройки
+    document.getElementById('add-category-btn').onclick = () => {
+      const name = document.getElementById('new-category-name').value.trim();
+      if (!name) return alert('Введите название категории');
+      data.categories.push({ id: 'cat-' + Date.now(), name, products: [] });
+      document.getElementById('new-category-name').value = '';
+      saveData();
+      renderSettings();
+      renderSales();
+    };
+
+    document.getElementById('reset-shift').onclick = resetShift;
+    document.getElementById('download-report').onclick = downloadReport;
+
+    // Инициализация
+    loadData();
+    renderSales();
+    renderSettings();
+  </script>
+</body>
+</html>
