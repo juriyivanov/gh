@@ -301,6 +301,15 @@
           <button class="btn btn-primary" id="add-category-btn">Добавить</button>
         </div>
       </div>
+      <div class="card">
+        <h2>Резервное копирование товаров</h2>
+        <p class="muted" style="margin-top:0;">Сохраните список категорий и товаров в файл или загрузите ранее сохранённый.</p>
+        <div class="actions" style="margin-top:8px; gap:8px;">
+          <button class="btn btn-ghost" id="export-catalog">Сохранить список</button>
+          <button class="btn btn-primary" id="import-catalog">Загрузить список</button>
+        </div>
+        <input type="file" id="catalog-file" accept="application/json" style="display:none;" />
+      </div>
     </section>
 
     <!-- Экран отчёта -->
@@ -401,6 +410,13 @@
 
     function formatCurrency(num) {
       return new Intl.NumberFormat('ru-RU').format(num) + ' ₽';
+    }
+
+    function generateId(prefix) {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return `${prefix}-${crypto.randomUUID()}`;
+      }
+      return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     }
 
     function findProduct(productId) {
@@ -582,7 +598,7 @@
           const price = parseInt(priceInput.value, 10);
           if (!name) return alert('Введите название');
           if (isNaN(price) || price <= 0) return alert('Введите цену в рублях');
-          const newProd = { id: 'p-' + Date.now(), name, price };
+          const newProd = { id: generateId('p'), name, price };
           cat.products.push(newProd);
           saveData();
           nameInput.value = '';
@@ -594,6 +610,51 @@
         block.appendChild(form);
         list.appendChild(block);
       });
+    }
+
+    function exportCatalog() {
+      const payload = { categories: data.categories };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const now = new Date();
+      a.download = `catalog-${now.toISOString().slice(0, 10)}.json`;
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Список сохранён');
+    }
+
+    function importCatalogFile(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (!parsed || !Array.isArray(parsed.categories)) throw new Error('Неверный формат файла');
+          const sanitizedCategories = parsed.categories.map((cat) => ({
+            id: cat.id || generateId('cat'),
+            name: cat.name || 'Без названия',
+            products: Array.isArray(cat.products)
+              ? cat.products.map((p) => ({
+                  id: p.id || generateId('p'),
+                  name: p.name || 'Товар',
+                  price: Number.isFinite(p.price) && p.price > 0 ? Math.round(p.price) : 0,
+                }))
+              : [],
+          }));
+          data.categories = sanitizedCategories;
+          data.sales = {};
+          saveData();
+          renderSettings();
+          renderSales();
+          showToast('Список товаров восстановлен');
+        } catch (err) {
+          alert('Не удалось загрузить файл: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
     }
 
     // Итоги
@@ -622,7 +683,11 @@
             totalSum,
           });
 
-          categoryTotals[cat.name] = (categoryTotals[cat.name] || 0) + totalSum;
+          if (!categoryTotals[cat.name]) {
+            categoryTotals[cat.name] = { sum: 0, count: 0 };
+          }
+          categoryTotals[cat.name].sum += totalSum;
+          categoryTotals[cat.name].count += totalCount;
           cashTotal += cashSum;
           qrTotal += qrSum;
         });
@@ -680,10 +745,10 @@
       catCard.className = 'card';
       catCard.innerHTML = '<h3>По категориям</h3>';
       const catList = document.createElement('div');
-      for (const [name, sum] of Object.entries(categoryTotals)) {
+      for (const [name, totals] of Object.entries(categoryTotals)) {
         const row = document.createElement('div');
         row.className = 'category-row';
-        row.innerHTML = `<span>${name}</span><strong>${formatCurrency(sum)}</strong>`;
+        row.innerHTML = `<span>${name} · ${totals.count} шт</span><strong>${formatCurrency(totals.sum)}</strong>`;
         catList.appendChild(row);
       }
       catCard.appendChild(catList);
@@ -723,8 +788,9 @@
       });
       lines.push('---');
       lines.push('Итоги по категориям');
-      Object.entries(categoryTotals).forEach(([name, sum]) => {
-        lines.push(`${name},${sum}`);
+      lines.push('Категория,Количество,Сумма');
+      Object.entries(categoryTotals).forEach(([name, totals]) => {
+        lines.push(`${name},${totals.count},${totals.sum}`);
       });
       lines.push('---');
       lines.push(`Наличные,${cashTotal}`);
@@ -761,11 +827,19 @@
     document.getElementById('add-category-btn').onclick = () => {
       const name = document.getElementById('new-category-name').value.trim();
       if (!name) return alert('Введите название категории');
-      data.categories.push({ id: 'cat-' + Date.now(), name, products: [] });
+      data.categories.push({ id: generateId('cat'), name, products: [] });
       document.getElementById('new-category-name').value = '';
       saveData();
       renderSettings();
       renderSales();
+    };
+
+    document.getElementById('export-catalog').onclick = exportCatalog;
+    document.getElementById('import-catalog').onclick = () => document.getElementById('catalog-file').click();
+    document.getElementById('catalog-file').onchange = (e) => {
+      const [file] = e.target.files || [];
+      if (file) importCatalogFile(file);
+      e.target.value = '';
     };
 
     document.getElementById('reset-shift').onclick = resetShift;
