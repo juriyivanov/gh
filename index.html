@@ -280,6 +280,7 @@
       <button id="nav-sales">Продажи</button>
       <button id="nav-settings">Настройки</button>
       <button id="nav-report">Итоги</button>
+      <button id="nav-operations">Операции</button>
     </div>
   </header>
   <main>
@@ -322,12 +323,31 @@
         <div id="report-summary"></div>
       </div>
     </section>
+
+    <!-- Экран операций -->
+    <section id="screen-operations" class="screen">
+      <div class="card">
+        <h2>Журнал операций</h2>
+        <div id="operations-list"></div>
+      </div>
+    </section>
   </main>
 
   <div class="modal-overlay" id="payment-modal">
     <div class="modal">
       <h3 id="payment-title">Оплата</h3>
       <p class="muted" id="payment-subtitle"></p>
+      <div class="form-inline" style="margin-top: 8px;">
+        <input type="number" id="payment-quantity" min="1" value="1" style="min-width:120px;" />
+        <label id="price-input-wrap" style="display:none; flex:1;">
+          <span class="muted" style="display:block; margin-bottom:4px;">Цена за единицу</span>
+          <input type="number" id="payment-price" min="1" />
+        </label>
+      </div>
+      <div class="category-row" style="margin-top:8px;">
+        <span class="muted">Итого</span>
+        <strong id="payment-total">0 ₽</strong>
+      </div>
       <div class="actions" style="margin-top:12px;">
         <button class="btn btn-primary" id="pay-cash">Наличные</button>
         <button class="btn btn-accent" id="pay-qr">QR-код</button>
@@ -344,6 +364,7 @@
     let data = null;
     let currentCategoryId = null;
     let pendingProductId = null;
+    let pendingProduct = null;
 
     function defaultData() {
       return {
@@ -368,6 +389,7 @@
           },
         ],
         sales: {}, // ключ productId: {cash: number, qr: number}
+        salesLog: [],
       };
     }
 
@@ -386,10 +408,49 @@
         data = defaultData();
       }
       if (!data.sales) data.sales = {};
+      if (!data.salesLog) data.salesLog = [];
     }
 
     function saveData() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+
+    function migrateLegacySales() {
+      if (data.salesLog.length) return;
+      let migrated = false;
+      Object.entries(data.sales || {}).forEach(([productId, counts]) => {
+        const found = findProduct(productId);
+        const productName = found?.product.name || 'Товар';
+        const categoryName = found?.category.name || 'Категория';
+        const price = found?.product.price || 0;
+        if (counts.cash) {
+          data.salesLog.push({
+            id: generateId('log'),
+            productId,
+            productName,
+            categoryName,
+            price,
+            quantity: counts.cash,
+            method: 'cash',
+            ts: Date.now(),
+          });
+          migrated = true;
+        }
+        if (counts.qr) {
+          data.salesLog.push({
+            id: generateId('log'),
+            productId,
+            productName,
+            categoryName,
+            price,
+            quantity: counts.qr,
+            method: 'qr',
+            ts: Date.now(),
+          });
+          migrated = true;
+        }
+      });
+      if (migrated) saveData();
     }
 
     function showScreen(id) {
@@ -398,6 +459,7 @@
       if (id === 'screen-report') renderReport();
       if (id === 'screen-sales') renderSales();
       if (id === 'screen-settings') renderSettings();
+      if (id === 'screen-operations') renderOperations();
     }
 
     // Вспомогательные функции
@@ -427,6 +489,16 @@
       return null;
     }
 
+    function rebuildSalesCounters() {
+      const counters = {};
+      data.salesLog.forEach((entry) => {
+        if (!counters[entry.productId]) counters[entry.productId] = { cash: 0, qr: 0 };
+        if (entry.method === 'cash') counters[entry.productId].cash += entry.quantity;
+        if (entry.method === 'qr') counters[entry.productId].qr += entry.quantity;
+      });
+      data.sales = counters;
+    }
+
     // Экран продаж
     function renderSales() {
       const tabs = document.getElementById('category-tabs');
@@ -452,14 +524,20 @@
       const category = data.categories.find((c) => c.id === currentCategoryId);
       const products = category ? category.products : [];
 
+      const counters = {};
+      data.salesLog.forEach((entry) => {
+        counters[entry.productId] = counters[entry.productId] || { total: 0 };
+        counters[entry.productId].total += entry.quantity;
+      });
+
       products.forEach((prod) => {
         const btn = document.createElement('button');
         btn.className = 'product-button';
-        btn.innerHTML = `<strong>${prod.name}</strong><span class="muted">${category.name}</span><span>${formatCurrency(prod.price)}</span>`;
+        const priceLabel = prod.variablePrice ? 'Свободная цена' : formatCurrency(prod.price);
+        btn.innerHTML = `<strong>${prod.name}</strong><span class="muted">${category.name}</span><span>${priceLabel}</span>`;
         btn.onclick = () => openPaymentModal(prod.id);
 
-        const counts = data.sales[prod.id] || { cash: 0, qr: 0 };
-        const totalCount = counts.cash + counts.qr;
+        const totalCount = counters[prod.id]?.total || 0;
         if (totalCount > 0) {
           const info = document.createElement('div');
           info.className = 'muted';
@@ -474,26 +552,71 @@
       pendingProductId = productId;
       const found = findProduct(productId);
       if (!found) return;
+      pendingProduct = found;
+      const priceInputWrap = document.getElementById('price-input-wrap');
+      const priceInput = document.getElementById('payment-price');
       document.getElementById('payment-title').textContent = found.product.name;
-      document.getElementById('payment-subtitle').textContent = `${found.category.name} · ${formatCurrency(found.product.price)}`;
+      document.getElementById('payment-subtitle').textContent = `${found.category.name} · ${
+        found.product.variablePrice ? 'свободная цена' : formatCurrency(found.product.price)
+      }`;
+      document.getElementById('payment-quantity').value = 1;
+      if (found.product.variablePrice) {
+        priceInputWrap.style.display = 'block';
+        priceInput.value = found.product.price || '';
+      } else {
+        priceInputWrap.style.display = 'none';
+        priceInput.value = '';
+      }
+      updatePaymentTotal();
       document.getElementById('payment-modal').classList.add('active');
     }
 
     function closePaymentModal() {
       document.getElementById('payment-modal').classList.remove('active');
       pendingProductId = null;
+      pendingProduct = null;
     }
 
     function registerSale(method) {
-      if (!pendingProductId) return;
-      const entry = data.sales[pendingProductId] || { cash: 0, qr: 0 };
-      if (method === 'cash') entry.cash += 1;
-      if (method === 'qr') entry.qr += 1;
-      data.sales[pendingProductId] = entry;
+      if (!pendingProductId || !pendingProduct) return;
+      const qtyInput = document.getElementById('payment-quantity');
+      const priceInput = document.getElementById('payment-price');
+      const quantity = Math.max(1, parseInt(qtyInput.value, 10) || 1);
+      let price = pendingProduct.product.price;
+      if (pendingProduct.product.variablePrice) {
+        price = parseInt(priceInput.value, 10);
+        if (!Number.isFinite(price) || price <= 0) {
+          alert('Введите цену продажи');
+          return;
+        }
+      }
+      const logEntry = {
+        id: generateId('log'),
+        productId: pendingProduct.product.id,
+        productName: pendingProduct.product.name,
+        categoryName: pendingProduct.category.name,
+        price,
+        quantity,
+        method,
+        ts: Date.now(),
+      };
+      data.salesLog.push(logEntry);
+      rebuildSalesCounters();
       saveData();
       closePaymentModal();
       renderSales();
+      renderReport();
+      renderOperations();
       showToast('Продажа записана');
+    }
+
+    function updatePaymentTotal() {
+      if (!pendingProduct) return;
+      const qty = Math.max(1, parseInt(document.getElementById('payment-quantity').value, 10) || 1);
+      const unitPrice = pendingProduct.product.variablePrice
+        ? parseInt(document.getElementById('payment-price').value, 10) || 0
+        : pendingProduct.product.price;
+      document.getElementById('payment-total').textContent = formatCurrency(Math.max(0, unitPrice) * qty);
     }
 
     // Экран настроек
@@ -547,7 +670,8 @@
           const row = document.createElement('div');
           row.className = 'category-row';
           const info = document.createElement('div');
-          info.innerHTML = `<strong>${prod.name}</strong><div class="muted">${formatCurrency(prod.price)}</div>`;
+          const priceInfo = prod.variablePrice ? 'Свободная цена' : formatCurrency(prod.price);
+          info.innerHTML = `<strong>${prod.name}</strong><div class="muted">${priceInfo}</div>`;
 
           const btns = document.createElement('div');
           const editBtn = document.createElement('button');
@@ -558,8 +682,10 @@
             if (!newName) return;
             const newPrice = prompt('Цена, руб', prod.price);
             if (!newPrice || isNaN(newPrice)) return alert('Введите число');
+            const variable = confirm('Цена изменяемая? (ОК - да, Отмена - нет)');
             prod.name = newName.trim();
             prod.price = parseInt(newPrice, 10);
+            prod.variablePrice = variable;
             saveData();
             renderSettings();
             renderSales();
@@ -588,21 +714,28 @@
         form.innerHTML = `
           <input type="text" placeholder="Новый товар" data-cat="${cat.id}" class="prod-name" />
           <input type="number" placeholder="Цена" data-cat="${cat.id}" class="prod-price" />
+          <label style="display:flex; align-items:center; gap:6px;">
+            <input type="checkbox" data-cat="${cat.id}" class="prod-variable" />
+            Свободная цена
+          </label>
           <button class="btn btn-primary" data-cat="${cat.id}">Добавить</button>
         `;
         const addBtn = form.querySelector('button');
         addBtn.onclick = () => {
           const nameInput = form.querySelector('.prod-name');
           const priceInput = form.querySelector('.prod-price');
+          const variableInput = form.querySelector('.prod-variable');
           const name = nameInput.value.trim();
           const price = parseInt(priceInput.value, 10);
+          const variablePrice = variableInput.checked;
           if (!name) return alert('Введите название');
-          if (isNaN(price) || price <= 0) return alert('Введите цену в рублях');
-          const newProd = { id: generateId('p'), name, price };
+          if (!variablePrice && (isNaN(price) || price <= 0)) return alert('Введите цену в рублях');
+          const newProd = { id: generateId('p'), name, price: Number.isFinite(price) ? price : 0, variablePrice };
           cat.products.push(newProd);
           saveData();
           nameInput.value = '';
           priceInput.value = '';
+          variableInput.checked = false;
           renderSettings();
           renderSales();
         };
@@ -641,14 +774,17 @@
                   id: p.id || generateId('p'),
                   name: p.name || 'Товар',
                   price: Number.isFinite(p.price) && p.price > 0 ? Math.round(p.price) : 0,
+                  variablePrice: !!p.variablePrice,
                 }))
               : [],
           }));
           data.categories = sanitizedCategories;
           data.sales = {};
+          data.salesLog = [];
           saveData();
           renderSettings();
           renderSales();
+          renderOperations();
           showToast('Список товаров восстановлен');
         } catch (err) {
           alert('Не удалось загрузить файл: ' + err.message);
@@ -664,33 +800,73 @@
       let cashTotal = 0;
       let qrTotal = 0;
 
+      const productAggregates = {};
       data.categories.forEach((cat) => {
         cat.products.forEach((prod) => {
-          const counts = data.sales[prod.id] || { cash: 0, qr: 0 };
-          const cashSum = counts.cash * prod.price;
-          const qrSum = counts.qr * prod.price;
-          const totalCount = counts.cash + counts.qr;
-          const totalSum = cashSum + qrSum;
-          productRows.push({
+          productAggregates[prod.id] = {
             category: cat.name,
             name: prod.name,
             price: prod.price,
-            cashCount: counts.cash,
-            qrCount: counts.qr,
-            totalCount,
-            cashSum,
-            qrSum,
-            totalSum,
-          });
-
-          if (!categoryTotals[cat.name]) {
-            categoryTotals[cat.name] = { sum: 0, count: 0 };
-          }
-          categoryTotals[cat.name].sum += totalSum;
-          categoryTotals[cat.name].count += totalCount;
-          cashTotal += cashSum;
-          qrTotal += qrSum;
+            cashCount: 0,
+            qrCount: 0,
+            cashSum: 0,
+            qrSum: 0,
+          };
         });
+      });
+
+      data.salesLog.forEach((entry) => {
+        const found = findProduct(entry.productId);
+        const categoryName = found?.category.name || entry.categoryName || 'Без категории';
+        const productName = found?.product.name || entry.productName || 'Товар';
+        const displayPrice = found?.product.price ?? entry.price;
+        if (!productAggregates[entry.productId]) {
+          productAggregates[entry.productId] = {
+            category: categoryName,
+            name: productName,
+            price: displayPrice,
+            cashCount: 0,
+            qrCount: 0,
+            cashSum: 0,
+            qrSum: 0,
+          };
+        }
+        const agg = productAggregates[entry.productId];
+        agg.category = categoryName;
+        agg.name = productName;
+        agg.price = displayPrice;
+        const saleSum = entry.price * entry.quantity;
+        if (entry.method === 'cash') {
+          agg.cashCount += entry.quantity;
+          agg.cashSum += saleSum;
+        } else {
+          agg.qrCount += entry.quantity;
+          agg.qrSum += saleSum;
+        }
+      });
+
+      Object.values(productAggregates).forEach((agg) => {
+        const totalCount = agg.cashCount + agg.qrCount;
+        const totalSum = agg.cashSum + agg.qrSum;
+        productRows.push({
+          category: agg.category,
+          name: agg.name,
+          price: agg.price,
+          cashCount: agg.cashCount,
+          qrCount: agg.qrCount,
+          totalCount,
+          cashSum: agg.cashSum,
+          qrSum: agg.qrSum,
+          totalSum,
+        });
+
+        if (!categoryTotals[agg.category]) {
+          categoryTotals[agg.category] = { sum: 0, count: 0 };
+        }
+        categoryTotals[agg.category].sum += totalSum;
+        categoryTotals[agg.category].count += totalCount;
+        cashTotal += agg.cashSum;
+        qrTotal += agg.qrSum;
       });
 
       const grandTotal = cashTotal + qrTotal;
@@ -770,9 +946,11 @@
       const ok = confirm('Сбросить все продажи за смену?');
       if (!ok) return;
       data.sales = {};
+      data.salesLog = [];
       saveData();
       renderReport();
       renderSales();
+      renderOperations();
       showToast('Смена сброшена');
     }
 
@@ -814,6 +992,7 @@
     document.getElementById('nav-sales').onclick = () => showScreen('screen-sales');
     document.getElementById('nav-settings').onclick = () => showScreen('screen-settings');
     document.getElementById('nav-report').onclick = () => showScreen('screen-report');
+    document.getElementById('nav-operations').onclick = () => showScreen('screen-operations');
 
     // Модал оплаты
     document.getElementById('pay-cash').onclick = () => registerSale('cash');
@@ -822,6 +1001,8 @@
     document.getElementById('payment-modal').onclick = (e) => {
       if (e.target.id === 'payment-modal') closePaymentModal();
     };
+    document.getElementById('payment-quantity').addEventListener('input', updatePaymentTotal);
+    document.getElementById('payment-price').addEventListener('input', updatePaymentTotal);
 
     // Настройки
     document.getElementById('add-category-btn').onclick = () => {
@@ -845,10 +1026,53 @@
     document.getElementById('reset-shift').onclick = resetShift;
     document.getElementById('download-report').onclick = downloadReport;
 
+    // Журнал операций
+    function renderOperations() {
+      const container = document.getElementById('operations-list');
+      container.innerHTML = '';
+      if (!data.salesLog.length) {
+        container.innerHTML = '<p class="muted" style="margin:0;">Пока нет продаж</p>';
+        return;
+      }
+      const sorted = [...data.salesLog].sort((a, b) => b.ts - a.ts);
+      sorted.forEach((entry) => {
+        const row = document.createElement('div');
+        row.className = 'category-row';
+        const info = document.createElement('div');
+        const method = entry.method === 'cash' ? 'Наличные' : 'QR';
+        const date = new Date(entry.ts).toLocaleString('ru-RU');
+        const total = formatCurrency(entry.price * entry.quantity);
+        info.innerHTML = `<strong>${entry.productName}</strong><div class="muted">${entry.categoryName || '—'} · ${
+          method
+        } · ${entry.quantity} шт · ${formatCurrency(entry.price)} за шт · ${total}</div><div class="muted">${date}</div>`;
+        const undoBtn = document.createElement('button');
+        undoBtn.className = 'btn btn-ghost';
+        undoBtn.textContent = 'Отменить';
+        undoBtn.onclick = () => undoOperation(entry.id);
+        row.append(info, undoBtn);
+        container.appendChild(row);
+      });
+    }
+
+    function undoOperation(id) {
+      const idx = data.salesLog.findIndex((e) => e.id === id);
+      if (idx === -1) return;
+      data.salesLog.splice(idx, 1);
+      rebuildSalesCounters();
+      saveData();
+      renderOperations();
+      renderSales();
+      renderReport();
+      showToast('Операция отменена');
+    }
+
     // Инициализация
     loadData();
+    migrateLegacySales();
+    rebuildSalesCounters();
     renderSales();
     renderSettings();
+    renderOperations();
   </script>
 </body>
 </html>
