@@ -192,6 +192,25 @@
       margin-top: 8px;
     }
 
+    .quantity-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .quantity-control input {
+      flex: 1;
+      min-width: 90px;
+      text-align: center;
+    }
+
+    .quantity-btn {
+      min-width: 44px;
+      padding: 10px;
+    }
+
     input, select {
       padding: 10px 12px;
       font-size: 16px;
@@ -338,7 +357,11 @@
       <h3 id="payment-title">Оплата</h3>
       <p class="muted" id="payment-subtitle"></p>
       <div class="form-inline" style="margin-top: 8px;">
-        <input type="number" id="payment-quantity" min="1" value="1" style="min-width:120px;" />
+        <div class="quantity-control">
+          <button class="btn btn-ghost quantity-btn" id="qty-minus" aria-label="Уменьшить количество">−</button>
+          <input type="number" id="payment-quantity" min="1" value="1" style="min-width:120px;" />
+          <button class="btn btn-ghost quantity-btn" id="qty-plus" aria-label="Увеличить количество">+</button>
+        </div>
         <label id="price-input-wrap" style="display:none; flex:1;">
           <span class="muted" style="display:block; margin-bottom:4px;">Цена за единицу</span>
           <input type="number" id="payment-price" min="1" />
@@ -608,6 +631,14 @@
       renderReport();
       renderOperations();
       showToast('Продажа записана');
+    }
+
+    function changeQuantity(delta) {
+      const input = document.getElementById('payment-quantity');
+      const current = Math.max(1, parseInt(input.value, 10) || 1);
+      const next = Math.max(1, current + delta);
+      input.value = next;
+      updatePaymentTotal();
     }
 
     function updatePaymentTotal() {
@@ -1001,6 +1032,8 @@
     document.getElementById('payment-modal').onclick = (e) => {
       if (e.target.id === 'payment-modal') closePaymentModal();
     };
+    document.getElementById('qty-minus').onclick = () => changeQuantity(-1);
+    document.getElementById('qty-plus').onclick = () => changeQuantity(1);
     document.getElementById('payment-quantity').addEventListener('input', updatePaymentTotal);
     document.getElementById('payment-price').addEventListener('input', updatePaymentTotal);
 
