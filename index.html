@@ -48,6 +48,11 @@
     .nav-buttons {
       display: flex;
       gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch;
+      flex: 1 1 auto;
+      min-width: 0;
     }
 
     .nav-buttons button {
@@ -59,6 +64,7 @@
       font-size: 14px;
       min-width: 80px;
       box-shadow: var(--shadow);
+      flex: 1 0 auto;
     }
 
     main {
@@ -226,6 +232,16 @@
       font-size: 14px;
     }
 
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .table-scroll table {
+      min-width: 720px;
+    }
+
     th, td {
       padding: 8px 6px;
       border-bottom: 1px solid var(--border);
@@ -287,6 +303,11 @@
 
     @media (max-width: 480px) {
       header h1 { font-size: 16px; }
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
       .product-button { min-height: 80px; }
       .nav-buttons button { padding: 8px 10px; }
     }
@@ -912,6 +933,8 @@
       const itemsCard = document.createElement('div');
       itemsCard.className = 'card';
       itemsCard.innerHTML = '<h3>По товарам</h3>';
+      const tableWrap = document.createElement('div');
+      tableWrap.className = 'table-scroll';
       const table = document.createElement('table');
       table.innerHTML = `
         <thead>
@@ -945,7 +968,8 @@
             )
             .join('')}
         </tbody>`;
-      itemsCard.appendChild(table);
+      tableWrap.appendChild(table);
+      itemsCard.appendChild(tableWrap);
       container.appendChild(itemsCard);
 
       const catCard = document.createElement('div');
