@@ -144,6 +144,13 @@
       gap: 10px;
     }
 
+    .cart-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 8px 0;
+    }
+
     .product-button {
       background: #fff;
       border: 1px solid var(--border);
@@ -330,6 +337,31 @@
         <div class="tabs" id="category-tabs"></div>
         <div class="product-grid" id="product-grid"></div>
       </div>
+      <div class="card" id="cart-card">
+        <div class="category-row">
+          <h3 style="margin:0;">Текущая покупка</h3>
+          <button class="btn btn-ghost" id="cart-clear">Очистить</button>
+        </div>
+        <div id="cart-items" class="cart-list"></div>
+        <div class="category-row">
+          <div>
+            <div class="muted">Итого</div>
+            <strong id="cart-total">0 ₽</strong>
+          </div>
+          <div style="text-align:right;">
+            <div class="muted">Сдача</div>
+            <strong id="cart-change">—</strong>
+          </div>
+        </div>
+        <label style="display:block; margin-top:8px;">
+          <span class="muted" style="display:block; margin-bottom:4px;">Деньги клиента (необязательно)</span>
+          <input type="number" id="cart-customer-cash" min="0" placeholder="Введите сумму" />
+        </label>
+        <div class="actions" style="margin-top:10px;">
+          <button class="btn btn-primary" id="cart-pay-cash">Оплатить наличными</button>
+          <button class="btn btn-accent" id="cart-pay-qr">Оплатить QR-кодом</button>
+        </div>
+      </div>
     </section>
 
     <!-- Экран настроек -->
@@ -392,9 +424,18 @@
         <span class="muted">Итого</span>
         <strong id="payment-total">0 ₽</strong>
       </div>
+      <label style="display:block; margin-top:8px;">
+        <span class="muted" style="display:block; margin-bottom:4px;">Деньги клиента (необязательно)</span>
+        <input type="number" id="payment-customer-cash" min="0" placeholder="Введите сумму" />
+      </label>
+      <div class="category-row" style="margin-top:6px;">
+        <span class="muted">Сдача</span>
+        <strong id="payment-change">—</strong>
+      </div>
       <div class="actions" style="margin-top:12px;">
         <button class="btn btn-primary" id="pay-cash">Наличные</button>
         <button class="btn btn-accent" id="pay-qr">QR-код</button>
+        <button class="btn btn-ghost" id="add-to-cart">Добавить в покупку</button>
         <button class="btn btn-ghost" id="pay-cancel">Отмена</button>
       </div>
     </div>
@@ -409,6 +450,7 @@
     let currentCategoryId = null;
     let pendingProductId = null;
     let pendingProduct = null;
+    let currentCart = [];
 
     function defaultData() {
       return {
@@ -518,6 +560,19 @@
       return new Intl.NumberFormat('ru-RU').format(num) + ' ₽';
     }
 
+    function parseCashValue(raw) {
+      if (raw === undefined || raw === null) return null;
+      const value = parseFloat(raw);
+      if (Number.isNaN(value) || value < 0) return null;
+      return value;
+    }
+
+    function calculateChange(total, cashValue) {
+      if (cashValue === null) return null;
+      const change = cashValue - total;
+      return change >= 0 ? change : null;
+    }
+
     function generateId(prefix) {
       if (typeof crypto !== 'undefined' && crypto.randomUUID) {
         return `${prefix}-${crypto.randomUUID()}`;
@@ -541,6 +596,10 @@
         if (entry.method === 'qr') counters[entry.productId].qr += entry.quantity;
       });
       data.sales = counters;
+    }
+
+    function cartTotal() {
+      return currentCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
     }
 
     // Экран продаж
@@ -590,6 +649,8 @@
         }
         grid.appendChild(btn);
       });
+
+      renderCart();
     }
 
     function openPaymentModal(productId) {
@@ -604,6 +665,7 @@
         found.product.variablePrice ? 'свободная цена' : formatCurrency(found.product.price)
       }`;
       document.getElementById('payment-quantity').value = 1;
+      document.getElementById('payment-customer-cash').value = '';
       if (found.product.variablePrice) {
         priceInputWrap.style.display = 'block';
         priceInput.value = found.product.price || '';
@@ -617,12 +679,13 @@
 
     function closePaymentModal() {
       document.getElementById('payment-modal').classList.remove('active');
+      document.getElementById('payment-change').textContent = '—';
       pendingProductId = null;
       pendingProduct = null;
     }
 
-    function registerSale(method) {
-      if (!pendingProductId || !pendingProduct) return;
+    function getPendingItem() {
+      if (!pendingProductId || !pendingProduct) return null;
       const qtyInput = document.getElementById('payment-quantity');
       const priceInput = document.getElementById('payment-price');
       const quantity = Math.max(1, parseInt(qtyInput.value, 10) || 1);
@@ -631,27 +694,131 @@
         price = parseInt(priceInput.value, 10);
         if (!Number.isFinite(price) || price <= 0) {
           alert('Введите цену продажи');
-          return;
+          return null;
         }
       }
-      const logEntry = {
-        id: generateId('log'),
+      return {
         productId: pendingProduct.product.id,
         productName: pendingProduct.product.name,
         categoryName: pendingProduct.category.name,
         price,
         quantity,
-        method,
-        ts: Date.now(),
       };
-      data.salesLog.push(logEntry);
+    }
+
+    function finalizeSale(method, items, customerCash) {
+      if (!items.length) return false;
+      const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      if (method === 'cash' && customerCash !== null && customerCash < total) {
+        alert('Денег клиента меньше суммы покупки');
+        return false;
+      }
+      const ts = Date.now();
+      items.forEach((item) => {
+        data.salesLog.push({
+          id: generateId('log'),
+          productId: item.productId,
+          productName: item.productName,
+          categoryName: item.categoryName,
+          price: item.price,
+          quantity: item.quantity,
+          method,
+          ts,
+        });
+      });
       rebuildSalesCounters();
       saveData();
-      closePaymentModal();
       renderSales();
       renderReport();
       renderOperations();
-      showToast('Продажа записана');
+      const change = method === 'cash' ? calculateChange(total, customerCash) : null;
+      if (change !== null) {
+        showToast(`Продажа записана · Сдача ${formatCurrency(change)}`);
+      } else {
+        showToast('Продажа записана');
+      }
+      return true;
+    }
+
+    function registerSale(method) {
+      const item = getPendingItem();
+      if (!item) return;
+      const customerCash = parseCashValue(document.getElementById('payment-customer-cash').value);
+      const success = finalizeSale(method, [item], customerCash);
+      if (success) closePaymentModal();
+    }
+
+    function addPendingToCart() {
+      const item = getPendingItem();
+      if (!item) return;
+      const existing = currentCart.find((i) => i.productId === item.productId && i.price === item.price);
+      if (existing) {
+        existing.quantity += item.quantity;
+      } else {
+        currentCart.push(item);
+      }
+      renderCart();
+      closePaymentModal();
+      showToast('Товар добавлен в покупку');
+    }
+
+    function renderCart() {
+      const container = document.getElementById('cart-items');
+      const totalEl = document.getElementById('cart-total');
+      const changeEl = document.getElementById('cart-change');
+      container.innerHTML = '';
+
+      if (!currentCart.length) {
+        container.innerHTML = '<p class="muted" style="margin:0;">Добавьте товары в покупку</p>';
+        totalEl.textContent = formatCurrency(0);
+        changeEl.textContent = '—';
+        return;
+      }
+
+      currentCart.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'category-row';
+        const info = document.createElement('div');
+        info.innerHTML = `<strong>${item.productName}</strong><div class="muted">${item.categoryName} · ${item.quantity} шт · ${formatCurrency(
+          item.price
+        )} за шт</div>`;
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn btn-ghost';
+        removeBtn.textContent = 'Убрать';
+        removeBtn.onclick = () => {
+          currentCart = currentCart.filter((i) => i !== item);
+          renderCart();
+        };
+        row.append(info, removeBtn);
+        container.appendChild(row);
+      });
+
+      const total = cartTotal();
+      totalEl.textContent = formatCurrency(total);
+      const cashValue = parseCashValue(document.getElementById('cart-customer-cash').value);
+      const change = calculateChange(total, cashValue);
+      changeEl.textContent = change !== null ? formatCurrency(change) : '—';
+    }
+
+    function payCart(method) {
+      if (!currentCart.length) {
+        alert('Добавьте товары в покупку');
+        return;
+      }
+      const cashValue = parseCashValue(document.getElementById('cart-customer-cash').value);
+      const success = finalizeSale(method, currentCart, cashValue);
+      if (success) {
+        currentCart = [];
+        document.getElementById('cart-customer-cash').value = '';
+        document.getElementById('cart-change').textContent = '—';
+        renderCart();
+      }
+    }
+
+    function clearCart() {
+      currentCart = [];
+      document.getElementById('cart-customer-cash').value = '';
+      renderCart();
     }
 
     function changeQuantity(delta) {
@@ -668,7 +835,11 @@
       const unitPrice = pendingProduct.product.variablePrice
         ? parseInt(document.getElementById('payment-price').value, 10) || 0
         : pendingProduct.product.price;
-      document.getElementById('payment-total').textContent = formatCurrency(Math.max(0, unitPrice) * qty);
+      const total = Math.max(0, unitPrice) * qty;
+      document.getElementById('payment-total').textContent = formatCurrency(total);
+      const cashValue = parseCashValue(document.getElementById('payment-customer-cash').value);
+      const change = calculateChange(total, cashValue);
+      document.getElementById('payment-change').textContent = change !== null ? formatCurrency(change) : '—';
     }
 
     // Экран настроек
@@ -1052,6 +1223,7 @@
     // Модал оплаты
     document.getElementById('pay-cash').onclick = () => registerSale('cash');
     document.getElementById('pay-qr').onclick = () => registerSale('qr');
+    document.getElementById('add-to-cart').onclick = addPendingToCart;
     document.getElementById('pay-cancel').onclick = closePaymentModal;
     document.getElementById('payment-modal').onclick = (e) => {
       if (e.target.id === 'payment-modal') closePaymentModal();
@@ -1060,6 +1232,13 @@
     document.getElementById('qty-plus').onclick = () => changeQuantity(1);
     document.getElementById('payment-quantity').addEventListener('input', updatePaymentTotal);
     document.getElementById('payment-price').addEventListener('input', updatePaymentTotal);
+    document.getElementById('payment-customer-cash').addEventListener('input', updatePaymentTotal);
+
+    // Корзина
+    document.getElementById('cart-pay-cash').onclick = () => payCart('cash');
+    document.getElementById('cart-pay-qr').onclick = () => payCart('qr');
+    document.getElementById('cart-clear').onclick = clearCart;
+    document.getElementById('cart-customer-cash').addEventListener('input', renderCart);
 
     // Настройки
     document.getElementById('add-category-btn').onclick = () => {
