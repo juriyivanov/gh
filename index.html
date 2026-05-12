@@ -249,6 +249,33 @@
       min-width: 720px;
     }
 
+    .sold-products-table-wrap {
+      overflow-x: visible;
+    }
+
+    .sold-products-table-wrap table {
+      min-width: 0;
+      table-layout: fixed;
+    }
+
+    .sold-products-table th,
+    .sold-products-table td {
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+
+    .sold-products-table th:nth-child(2),
+    .sold-products-table td:nth-child(2) {
+      width: 82px;
+      text-align: right;
+    }
+
+    .sold-products-table th:nth-child(3),
+    .sold-products-table td:nth-child(3) {
+      width: 96px;
+      text-align: right;
+    }
+
     th, td {
       padding: 8px 6px;
       border-bottom: 1px solid var(--border);
@@ -317,6 +344,13 @@
       }
       .product-button { min-height: 80px; }
       .nav-buttons button { padding: 8px 10px; }
+      .sold-products-table { font-size: 13px; }
+      .sold-products-table th,
+      .sold-products-table td { padding: 6px 4px; }
+      .sold-products-table th:nth-child(2),
+      .sold-products-table td:nth-child(2) { width: 68px; }
+      .sold-products-table th:nth-child(3),
+      .sold-products-table td:nth-child(3) { width: 84px; }
     }
   </style>
 </head>
@@ -1148,8 +1182,9 @@
       soldItemsCard.className = 'card';
       soldItemsCard.innerHTML = '<h3>Проданные товары</h3>';
       const soldTableWrap = document.createElement('div');
-      soldTableWrap.className = 'table-scroll';
+      soldTableWrap.className = 'table-scroll sold-products-table-wrap';
       const soldTable = document.createElement('table');
+      soldTable.className = 'sold-products-table';
       soldTable.innerHTML = `
         <thead>
           <tr>
