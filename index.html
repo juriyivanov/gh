@@ -1092,12 +1092,13 @@
         qrTotal += agg.qrSum;
       });
 
+      const soldProductRows = productRows.filter((row) => row.totalCount > 0);
       const grandTotal = cashTotal + qrTotal;
-      return { productRows, categoryTotals, cashTotal, qrTotal, grandTotal };
+      return { productRows, soldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal };
     }
 
     function renderReport() {
-      const { productRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
+      const { productRows, soldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
       const container = document.getElementById('report-summary');
       container.innerHTML = '';
 
@@ -1143,6 +1144,38 @@
       itemsCard.appendChild(tableWrap);
       container.appendChild(itemsCard);
 
+      const soldItemsCard = document.createElement('div');
+      soldItemsCard.className = 'card';
+      soldItemsCard.innerHTML = '<h3>Проданные товары</h3>';
+      const soldTableWrap = document.createElement('div');
+      soldTableWrap.className = 'table-scroll';
+      const soldTable = document.createElement('table');
+      soldTable.innerHTML = `
+        <thead>
+          <tr>
+            <th>Товар</th>
+            <th>Продано всего</th>
+            <th>Сумма</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${soldProductRows.length
+            ? soldProductRows
+                .map(
+                  (r) => `
+                  <tr>
+                    <td>${r.name}</td>
+                    <td>${r.totalCount}</td>
+                    <td>${formatCurrency(r.totalSum)}</td>
+                  </tr>`
+                )
+                .join('')
+            : '<tr><td colspan="3" class="muted">Пока нет проданных товаров</td></tr>'}
+        </tbody>`;
+      soldTableWrap.appendChild(soldTable);
+      soldItemsCard.appendChild(soldTableWrap);
+      container.appendChild(soldItemsCard);
+
       const catCard = document.createElement('div');
       catCard.className = 'card';
       catCard.innerHTML = '<h3>По категориям</h3>';
@@ -1181,7 +1214,7 @@
     }
 
     function downloadReport() {
-      const { productRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
+      const { productRows, soldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
       const lines = [];
       const now = new Date();
       lines.push(`Отчёт,${now.toLocaleString('ru-RU')}`);
@@ -1189,6 +1222,12 @@
       lines.push('Категория,Товар,Цена,Нал (шт),QR (шт),Всего (шт),Нал (сумма),QR (сумма),Итого');
       productRows.forEach((r) => {
         lines.push(`${r.category},${r.name},${r.price},${r.cashCount},${r.qrCount},${r.totalCount},${r.cashSum},${r.qrSum},${r.totalSum}`);
+      });
+      lines.push('---');
+      lines.push('Проданные товары');
+      lines.push('Товар,Продано всего,Сумма');
+      soldProductRows.forEach((r) => {
+        lines.push(`${r.name},${r.totalCount},${r.totalSum}`);
       });
       lines.push('---');
       lines.push('Итоги по категориям');
