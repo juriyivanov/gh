@@ -1126,13 +1126,49 @@
         qrTotal += agg.qrSum;
       });
 
-      const soldProductRows = productRows.filter((row) => row.totalCount > 0);
+      const cashSoldProductRows = productRows.filter((row) => row.cashCount > 0);
+      const qrSoldProductRows = productRows.filter((row) => row.qrCount > 0);
       const grandTotal = cashTotal + qrTotal;
-      return { productRows, soldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal };
+      return { productRows, cashSoldProductRows, qrSoldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal };
+    }
+
+    function renderSoldProductsTable(title, rows, countKey, sumKey, emptyMessage) {
+      const soldItemsCard = document.createElement('div');
+      soldItemsCard.className = 'card';
+      soldItemsCard.innerHTML = `<h3>${title}</h3>`;
+      const soldTableWrap = document.createElement('div');
+      soldTableWrap.className = 'table-scroll sold-products-table-wrap';
+      const soldTable = document.createElement('table');
+      soldTable.className = 'sold-products-table';
+      soldTable.innerHTML = `
+        <thead>
+          <tr>
+            <th>Товар</th>
+            <th>Продано</th>
+            <th>Сумма</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.length
+            ? rows
+                .map(
+                  (r) => `
+                  <tr>
+                    <td>${r.name}</td>
+                    <td>${r[countKey]}</td>
+                    <td>${formatCurrency(r[sumKey])}</td>
+                  </tr>`
+                )
+                .join('')
+            : `<tr><td colspan="3" class="muted">${emptyMessage}</td></tr>`}
+        </tbody>`;
+      soldTableWrap.appendChild(soldTable);
+      soldItemsCard.appendChild(soldTableWrap);
+      return soldItemsCard;
     }
 
     function renderReport() {
-      const { productRows, soldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
+      const { productRows, cashSoldProductRows, qrSoldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
       const container = document.getElementById('report-summary');
       container.innerHTML = '';
 
@@ -1178,38 +1214,24 @@
       itemsCard.appendChild(tableWrap);
       container.appendChild(itemsCard);
 
-      const soldItemsCard = document.createElement('div');
-      soldItemsCard.className = 'card';
-      soldItemsCard.innerHTML = '<h3>Проданные товары</h3>';
-      const soldTableWrap = document.createElement('div');
-      soldTableWrap.className = 'table-scroll sold-products-table-wrap';
-      const soldTable = document.createElement('table');
-      soldTable.className = 'sold-products-table';
-      soldTable.innerHTML = `
-        <thead>
-          <tr>
-            <th>Товар</th>
-            <th>Продано всего</th>
-            <th>Сумма</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${soldProductRows.length
-            ? soldProductRows
-                .map(
-                  (r) => `
-                  <tr>
-                    <td>${r.name}</td>
-                    <td>${r.totalCount}</td>
-                    <td>${formatCurrency(r.totalSum)}</td>
-                  </tr>`
-                )
-                .join('')
-            : '<tr><td colspan="3" class="muted">Пока нет проданных товаров</td></tr>'}
-        </tbody>`;
-      soldTableWrap.appendChild(soldTable);
-      soldItemsCard.appendChild(soldTableWrap);
-      container.appendChild(soldItemsCard);
+      container.appendChild(
+        renderSoldProductsTable(
+          'Проданные товары — наличные',
+          cashSoldProductRows,
+          'cashCount',
+          'cashSum',
+          'Пока нет проданных товаров за наличные'
+        )
+      );
+      container.appendChild(
+        renderSoldProductsTable(
+          'Проданные товары — QR',
+          qrSoldProductRows,
+          'qrCount',
+          'qrSum',
+          'Пока нет проданных товаров через QR'
+        )
+      );
 
       const catCard = document.createElement('div');
       catCard.className = 'card';
@@ -1249,7 +1271,7 @@
     }
 
     function downloadReport() {
-      const { productRows, soldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
+      const { productRows, cashSoldProductRows, qrSoldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
       const lines = [];
       const now = new Date();
       lines.push(`Отчёт,${now.toLocaleString('ru-RU')}`);
@@ -1259,10 +1281,16 @@
         lines.push(`${r.category},${r.name},${r.price},${r.cashCount},${r.qrCount},${r.totalCount},${r.cashSum},${r.qrSum},${r.totalSum}`);
       });
       lines.push('---');
-      lines.push('Проданные товары');
-      lines.push('Товар,Продано всего,Сумма');
-      soldProductRows.forEach((r) => {
-        lines.push(`${r.name},${r.totalCount},${r.totalSum}`);
+      lines.push('Проданные товары — наличные');
+      lines.push('Товар,Продано,Сумма');
+      cashSoldProductRows.forEach((r) => {
+        lines.push(`${r.name},${r.cashCount},${r.cashSum}`);
+      });
+      lines.push('---');
+      lines.push('Проданные товары — QR');
+      lines.push('Товар,Продано,Сумма');
+      qrSoldProductRows.forEach((r) => {
+        lines.push(`${r.name},${r.qrCount},${r.qrSum}`);
       });
       lines.push('---');
       lines.push('Итоги по категориям');
