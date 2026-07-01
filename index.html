@@ -480,6 +480,8 @@
   <script>
     // Основные структуры данных
     const STORAGE_KEY = 'churchShopDataV1';
+    const BACKUP_KEY = STORAGE_KEY + ':backups';
+    const MAX_BACKUPS = 10;
     let data = null;
     let currentCategoryId = null;
     let pendingProductId = null;
@@ -510,29 +512,133 @@
         ],
         sales: {}, // ключ productId: {cash: number, qr: number}
         salesLog: [],
+        meta: { lastWriteTs: 0, deletedSaleIds: [] },
       };
+    }
+
+    function normalizeDataShape(value) {
+      const fallback = defaultData();
+      if (!value || typeof value !== 'object') return fallback;
+      return {
+        categories: Array.isArray(value.categories) ? value.categories : fallback.categories,
+        sales: value.sales && typeof value.sales === 'object' ? value.sales : {},
+        salesLog: Array.isArray(value.salesLog) ? value.salesLog : [],
+        meta: {
+          lastWriteTs: Number(value.meta?.lastWriteTs) || 0,
+          deletedSaleIds: Array.isArray(value.meta?.deletedSaleIds) ? value.meta.deletedSaleIds : [],
+        },
+      };
+    }
+
+    function parseStoredData(raw) {
+      if (!raw) return null;
+      return normalizeDataShape(JSON.parse(raw));
+    }
+
+    function salesLogWeight(value) {
+      return Array.isArray(value?.salesLog) ? value.salesLog.length : 0;
+    }
+
+    function readBackups() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(BACKUP_KEY) || '[]');
+        return Array.isArray(parsed) ? parsed.map(normalizeDataShape) : [];
+      } catch (e) {
+        console.error('Ошибка чтения резервных копий', e);
+        return [];
+      }
+    }
+
+    function clearBackups() {
+      localStorage.removeItem(BACKUP_KEY);
+    }
+
+    function writeBackup(snapshot) {
+      try {
+        const backups = readBackups();
+        backups.push(normalizeDataShape(JSON.parse(JSON.stringify(snapshot))));
+        backups.sort((a, b) => (b.meta?.lastWriteTs || 0) - (a.meta?.lastWriteTs || 0));
+        localStorage.setItem(BACKUP_KEY, JSON.stringify(backups.slice(0, MAX_BACKUPS)));
+      } catch (e) {
+        console.error('Ошибка записи резервной копии', e);
+      }
+    }
+
+    function newestDataVariant(variants) {
+      return variants.sort((a, b) => {
+        const tsDiff = (b.meta?.lastWriteTs || 0) - (a.meta?.lastWriteTs || 0);
+        if (tsDiff !== 0) return tsDiff;
+        return salesLogWeight(b) - salesLogWeight(a);
+      })[0] || defaultData();
+    }
+
+    function mergeDataVariants(preferred, variants) {
+      const normalized = [preferred, ...variants].filter(Boolean).map(normalizeDataShape);
+      const base = normalizeDataShape(preferred || newestDataVariant(normalized));
+      const deletedSaleIds = new Set();
+      normalized.forEach((variant) => {
+        (variant.meta?.deletedSaleIds || []).forEach((id) => deletedSaleIds.add(id));
+      });
+
+      const salesById = new Map();
+      normalized.forEach((variant) => {
+        variant.salesLog.forEach((entry) => {
+          if (!entry?.id || deletedSaleIds.has(entry.id)) return;
+          const existing = salesById.get(entry.id);
+          if (!existing || (entry.ts || 0) >= (existing.ts || 0)) salesById.set(entry.id, entry);
+        });
+      });
+
+      base.salesLog = Array.from(salesById.values()).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      base.meta = {
+        lastWriteTs: Math.max(...normalized.map((variant) => Number(variant.meta?.lastWriteTs) || 0), 0),
+        deletedSaleIds: Array.from(deletedSaleIds),
+      };
+      return base;
+    }
+
+    function restoreNewestCompleteData(candidate) {
+      const variants = [candidate, ...readBackups()].filter(Boolean).map(normalizeDataShape);
+      const newest = newestDataVariant([...variants]);
+      const merged = mergeDataVariants(newest, variants);
+      if (candidate && salesLogWeight(merged) > salesLogWeight(candidate)) {
+        showToast('Восстановлены продажи из резервной копии');
+      }
+      return merged;
+    }
+
+    function nextTimestamp() {
+      const now = Date.now();
+      const last = Number(data?.meta?.lastWriteTs) || 0;
+      return Math.max(now, last + 1);
     }
 
     // Работа с localStorage
     function loadData() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          data = JSON.parse(raw);
-        } else {
-          data = defaultData();
-          saveData();
-        }
+        data = raw ? parseStoredData(raw) : defaultData();
+        data = restoreNewestCompleteData(data);
+        if (!raw) saveData();
       } catch (e) {
         console.error('Ошибка чтения данных', e);
-        data = defaultData();
+        data = restoreNewestCompleteData(defaultData());
       }
       if (!data.sales) data.sales = {};
       if (!data.salesLog) data.salesLog = [];
+      if (!data.meta) data.meta = { lastWriteTs: 0, deletedSaleIds: [] };
     }
 
-    function saveData() {
+    function saveData({ mergeExisting = true } = {}) {
+      if (!data.meta) data.meta = { lastWriteTs: 0, deletedSaleIds: [] };
+      if (mergeExisting) {
+        const stored = parseStoredData(localStorage.getItem(STORAGE_KEY));
+        data = mergeDataVariants(data, [stored, ...readBackups()]);
+        rebuildSalesCounters();
+      }
+      data.meta.lastWriteTs = nextTimestamp();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      writeBackup(data);
     }
 
     function migrateLegacySales() {
@@ -747,7 +853,7 @@
         alert('Денег клиента меньше суммы покупки');
         return false;
       }
-      const ts = Date.now();
+      const ts = nextTimestamp();
       items.forEach((item) => {
         data.salesLog.push({
           id: generateId('log'),
@@ -1038,7 +1144,9 @@
           data.categories = sanitizedCategories;
           data.sales = {};
           data.salesLog = [];
-          saveData();
+          data.meta = { lastWriteTs: 0, deletedSaleIds: [] };
+          clearBackups();
+          saveData({ mergeExisting: false });
           renderSettings();
           renderSales();
           renderOperations();
@@ -1263,7 +1371,9 @@
       if (!ok) return;
       data.sales = {};
       data.salesLog = [];
-      saveData();
+      data.meta = { lastWriteTs: 0, deletedSaleIds: [] };
+      clearBackups();
+      saveData({ mergeExisting: false });
       renderReport();
       renderSales();
       renderOperations();
@@ -1395,6 +1505,9 @@
     function undoOperation(id) {
       const idx = data.salesLog.findIndex((e) => e.id === id);
       if (idx === -1) return;
+      if (!data.meta) data.meta = { lastWriteTs: 0, deletedSaleIds: [] };
+      if (!Array.isArray(data.meta.deletedSaleIds)) data.meta.deletedSaleIds = [];
+      data.meta.deletedSaleIds.push(id);
       data.salesLog.splice(idx, 1);
       rebuildSalesCounters();
       saveData();
