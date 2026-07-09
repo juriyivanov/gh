@@ -1,18 +1,35 @@
-const CACHE_NAME = 'church-shop-pwa-v1';
+const CACHE_NAME = 'church-shop-pwa-v2';
 const PRECACHE_URLS = [
   './',
   './index.html',
   './manifest.json',
+];
+
+// Icons are cached opportunistically so replacing SVG icons with PNG files later
+// does not break service worker installation when the old files disappear.
+const OPTIONAL_ICON_URLS = [
   './icon-192.svg',
   './icon-512.svg',
+  './icon-192.png',
+  './icon-512.png',
 ];
+
+function cacheOptionalUrl(cache, url) {
+  return fetch(url)
+    .then((response) => {
+      if (!response.ok) return null;
+      return cache.put(url, response);
+    })
+    .catch(() => null);
+}
 
 self.addEventListener('install', (event) => {
   if (self.location.protocol === 'file:') return;
 
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
+      .then((cache) => cache.addAll(PRECACHE_URLS)
+        .then(() => Promise.all(OPTIONAL_ICON_URLS.map((url) => cacheOptionalUrl(cache, url)))))
       .then(() => self.skipWaiting())
   );
 });
