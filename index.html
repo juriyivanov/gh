@@ -796,6 +796,14 @@
       return new Intl.NumberFormat('ru-RU').format(num) + ' ₽';
     }
 
+    function formatReportNumber(num) {
+      return num === 0 ? '' : num;
+    }
+
+    function formatReportCurrency(num) {
+      return num === 0 ? '' : formatCurrency(num);
+    }
+
     function parseCashValue(raw) {
       if (raw === undefined || raw === null) return null;
       const value = parseFloat(raw);
@@ -1413,8 +1421,8 @@
                   (r) => `
                   <tr>
                     <td>${r.name}</td>
-                    <td>${r[countKey]}</td>
-                    <td>${formatCurrency(r[sumKey])}</td>
+                    <td>${formatReportNumber(r[countKey])}</td>
+                    <td>${formatReportCurrency(r[sumKey])}</td>
                   </tr>`
                 )
                 .join('')
@@ -1475,13 +1483,13 @@
               <tr>
                 <td>${r.category}</td>
                 <td>${r.name}</td>
-                <td>${formatCurrency(r.price)}</td>
-                <td>${r.cashCount}</td>
-                <td>${r.qrCount}</td>
-                <td>${r.totalCount}</td>
-                <td>${formatCurrency(r.cashSum)}</td>
-                <td>${formatCurrency(r.qrSum)}</td>
-                <td>${formatCurrency(r.totalSum)}</td>
+                <td>${formatReportCurrency(r.price)}</td>
+                <td>${formatReportNumber(r.cashCount)}</td>
+                <td>${formatReportNumber(r.qrCount)}</td>
+                <td>${formatReportNumber(r.totalCount)}</td>
+                <td>${formatReportCurrency(r.cashSum)}</td>
+                <td>${formatReportCurrency(r.qrSum)}</td>
+                <td>${formatReportCurrency(r.totalSum)}</td>
               </tr>`
             )
             .join('')}
@@ -1516,7 +1524,9 @@
       for (const [name, totals] of Object.entries(categoryTotals)) {
         const row = document.createElement('div');
         row.className = 'category-row';
-        row.innerHTML = `<span>${name} · ${totals.count} шт</span><strong>${formatCurrency(totals.sum)}</strong>`;
+        row.innerHTML = `<span>${name} · ${formatReportNumber(totals.count)} шт</span><strong>${formatReportCurrency(
+          totals.sum
+        )}</strong>`;
         catList.appendChild(row);
       }
       catCard.appendChild(catList);
@@ -1526,10 +1536,10 @@
       totalsCard.className = 'card';
       totalsCard.innerHTML = `
         <h3>Оплаты</h3>
-        <div class="category-row"><span>Наличные</span><strong>${formatCurrency(cashTotal)}</strong></div>
-        <div class="category-row"><span>QR-код</span><strong>${formatCurrency(qrTotal)}</strong></div>
+        <div class="category-row"><span>Наличные</span><strong>${formatReportCurrency(cashTotal)}</strong></div>
+        <div class="category-row"><span>QR-код</span><strong>${formatReportCurrency(qrTotal)}</strong></div>
         <hr style="border:0;border-top:1px solid var(--border);margin:10px 0;" />
-        <div class="category-row"><span>Итого</span><strong>${formatCurrency(grandTotal)}</strong></div>
+        <div class="category-row"><span>Итого</span><strong>${formatReportCurrency(grandTotal)}</strong></div>
       `;
       container.appendChild(totalsCard);
     }
@@ -1585,30 +1595,36 @@
       lines.push('---');
       lines.push('Категория,Товар,Цена,Нал (шт),QR (шт),Всего (шт),Нал (сумма),QR (сумма),Итого');
       productRows.forEach((r) => {
-        lines.push(`${r.category},${r.name},${r.price},${r.cashCount},${r.qrCount},${r.totalCount},${r.cashSum},${r.qrSum},${r.totalSum}`);
+        lines.push(
+          `${r.category},${r.name},${formatReportNumber(r.price)},${formatReportNumber(
+            r.cashCount
+          )},${formatReportNumber(r.qrCount)},${formatReportNumber(r.totalCount)},${formatReportNumber(
+            r.cashSum
+          )},${formatReportNumber(r.qrSum)},${formatReportNumber(r.totalSum)}`
+        );
       });
       lines.push('---');
       lines.push('Проданные товары — наличные');
       lines.push('Товар,Продано,Сумма');
       cashSoldProductRows.forEach((r) => {
-        lines.push(`${r.name},${r.cashCount},${r.cashSum}`);
+        lines.push(`${r.name},${formatReportNumber(r.cashCount)},${formatReportNumber(r.cashSum)}`);
       });
       lines.push('---');
       lines.push('Проданные товары — QR');
       lines.push('Товар,Продано,Сумма');
       qrSoldProductRows.forEach((r) => {
-        lines.push(`${r.name},${r.qrCount},${r.qrSum}`);
+        lines.push(`${r.name},${formatReportNumber(r.qrCount)},${formatReportNumber(r.qrSum)}`);
       });
       lines.push('---');
       lines.push('Итоги по категориям');
       lines.push('Категория,Количество,Сумма');
       Object.entries(categoryTotals).forEach(([name, totals]) => {
-        lines.push(`${name},${totals.count},${totals.sum}`);
+        lines.push(`${name},${formatReportNumber(totals.count)},${formatReportNumber(totals.sum)}`);
       });
       lines.push('---');
-      lines.push(`Наличные,${cashTotal}`);
-      lines.push(`QR-код,${qrTotal}`);
-      lines.push(`Итого,${grandTotal}`);
+      lines.push(`Наличные,${formatReportNumber(cashTotal)}`);
+      lines.push(`QR-код,${formatReportNumber(qrTotal)}`);
+      lines.push(`Итого,${formatReportNumber(grandTotal)}`);
 
       const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
