@@ -1330,22 +1330,6 @@
       let qrTotal = 0;
 
       const productAggregates = {};
-      if (shiftId === data.currentShiftId) {
-        data.categories.forEach((cat) => {
-          cat.products.forEach((prod) => {
-            productAggregates[prod.id] = {
-              category: cat.name,
-              name: prod.name,
-              price: prod.price,
-              cashCount: 0,
-              qrCount: 0,
-              cashSum: 0,
-              qrSum: 0,
-            };
-          });
-        });
-      }
-
       getShiftSales(shiftId).forEach((entry) => {
         const found = findProduct(entry.productId);
         const categoryName = entry.categoryName || found?.category.name || 'Без категории';
