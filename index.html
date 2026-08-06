@@ -425,7 +425,7 @@
       </div>
       <div class="card">
         <h2>Резервное копирование всех данных</h2>
-        <p class="muted" style="margin-top:0;">Сохраните или восстановите полный набор данных приложения: каталог, продажи, журнал операций и служебные метки.</p>
+        <p class="muted" style="margin-top:0;">Сохраните или восстановите полный набор данных приложения: каталог, смены, продажи, журнал операций и служебные метки.</p>
         <div class="actions" style="margin-top:8px; gap:8px;">
           <button class="btn btn-ghost" id="export-all-data">Экспорт всех данных</button>
           <button class="btn btn-primary" id="import-all-data">Импорт всех данных</button>
@@ -437,9 +437,15 @@
     <!-- Экран отчёта -->
     <section id="screen-report" class="screen">
       <div class="card">
+        <h2 style="margin-top:0;">Итоги смены</h2>
+        <div class="form-inline" style="margin-bottom:10px;">
+          <select id="report-shift-select" aria-label="Выберите смену"></select>
+        </div>
+        <p class="muted" id="report-shift-info" style="margin:0 0 10px;"></p>
         <div class="actions" style="margin-bottom:10px;">
           <button class="btn btn-primary" id="download-report">Сохранить итоги</button>
-          <button class="btn btn-danger" id="reset-shift">Сбросить смену</button>
+          <button class="btn btn-accent" id="new-shift">Новая смена</button>
+          <button class="btn btn-danger" id="delete-shift" style="display:none;">Удалить смену</button>
         </div>
         <div id="report-summary"></div>
       </div>
@@ -502,8 +508,18 @@
     let pendingProductId = null;
     let pendingProduct = null;
     let currentCart = [];
+    let selectedReportShiftId = null;
+
+    function createShift(startedAt = Date.now()) {
+      return {
+        id: generateId('shift'),
+        startedAt,
+        endedAt: null,
+      };
+    }
 
     function defaultData() {
+      const initialShift = createShift();
       return {
         categories: [
           {
@@ -527,20 +543,58 @@
         ],
         sales: {}, // ключ productId: {cash: number, qr: number}
         salesLog: [],
-        meta: { lastWriteTs: 0, deletedSaleIds: [] },
+        shifts: [initialShift],
+        currentShiftId: initialShift.id,
+        meta: { lastWriteTs: 0, deletedSaleIds: [], deletedShiftIds: [] },
       };
     }
 
     function normalizeDataShape(value) {
       const fallback = defaultData();
       if (!value || typeof value !== 'object') return fallback;
+      const rawSalesLog = Array.isArray(value.salesLog) ? value.salesLog : [];
+      const hasStoredShifts = Array.isArray(value.shifts) && value.shifts.length > 0;
+      const legacyShiftId = 'shift-legacy';
+      const salesLog = rawSalesLog.map((entry) => ({
+        ...entry,
+        shiftId: entry?.shiftId || legacyShiftId,
+      }));
+      let shifts = hasStoredShifts
+        ? value.shifts
+            .filter((shift) => shift && typeof shift === 'object' && shift.id)
+            .map((shift) => ({
+              id: shift.id,
+              startedAt: Number(shift.startedAt) || Date.now(),
+              endedAt: Number(shift.endedAt) || null,
+            }))
+        : [];
+
+      if (!shifts.length) {
+        const firstSaleTs = salesLog.reduce((min, entry) => Math.min(min, Number(entry.ts) || min), Date.now());
+        shifts = [{ id: legacyShiftId, startedAt: firstSaleTs, endedAt: null }];
+      }
+
+      const knownShiftIds = new Set(shifts.map((shift) => shift.id));
+      salesLog.forEach((entry) => {
+        if (!knownShiftIds.has(entry.shiftId)) {
+          shifts.push({ id: entry.shiftId, startedAt: Number(entry.ts) || Date.now(), endedAt: null });
+          knownShiftIds.add(entry.shiftId);
+        }
+      });
+
+      const requestedCurrentShiftId = value.currentShiftId;
+      const currentShift = shifts.find((shift) => shift.id === requestedCurrentShiftId)
+        || [...shifts].sort((a, b) => b.startedAt - a.startedAt)[0];
       return {
         categories: Array.isArray(value.categories) ? value.categories : fallback.categories,
         sales: value.sales && typeof value.sales === 'object' ? value.sales : {},
-        salesLog: Array.isArray(value.salesLog) ? value.salesLog : [],
+        salesLog,
+        shifts,
+        currentShiftId: currentShift.id,
         meta: {
           lastWriteTs: Number(value.meta?.lastWriteTs) || 0,
           deletedSaleIds: Array.isArray(value.meta?.deletedSaleIds) ? value.meta.deletedSaleIds : [],
+          deletedShiftIds: Array.isArray(value.meta?.deletedShiftIds) ? value.meta.deletedShiftIds : [],
         },
       };
     }
@@ -591,23 +645,48 @@
       const normalized = [preferred, ...variants].filter(Boolean).map(normalizeDataShape);
       const base = normalizeDataShape(preferred || newestDataVariant(normalized));
       const deletedSaleIds = new Set();
+      const deletedShiftIds = new Set();
       normalized.forEach((variant) => {
         (variant.meta?.deletedSaleIds || []).forEach((id) => deletedSaleIds.add(id));
+        (variant.meta?.deletedShiftIds || []).forEach((id) => deletedShiftIds.add(id));
+      });
+
+      const shiftsById = new Map();
+      normalized.forEach((variant) => {
+        variant.shifts.forEach((shift) => {
+          if (!shift?.id || deletedShiftIds.has(shift.id)) return;
+          const existing = shiftsById.get(shift.id);
+          if (!existing) {
+            shiftsById.set(shift.id, { ...shift });
+            return;
+          }
+          const endedAtValues = [existing.endedAt, shift.endedAt].filter(Boolean);
+          shiftsById.set(shift.id, {
+            id: shift.id,
+            startedAt: Math.min(existing.startedAt, shift.startedAt),
+            endedAt: endedAtValues.length ? Math.max(...endedAtValues) : null,
+          });
+        });
       });
 
       const salesById = new Map();
       normalized.forEach((variant) => {
         variant.salesLog.forEach((entry) => {
-          if (!entry?.id || deletedSaleIds.has(entry.id)) return;
+          if (!entry?.id || deletedSaleIds.has(entry.id) || deletedShiftIds.has(entry.shiftId)) return;
           const existing = salesById.get(entry.id);
           if (!existing || (entry.ts || 0) >= (existing.ts || 0)) salesById.set(entry.id, entry);
         });
       });
 
+      base.shifts = Array.from(shiftsById.values()).sort((a, b) => a.startedAt - b.startedAt);
+      if (!base.shifts.some((shift) => shift.id === base.currentShiftId)) {
+        base.currentShiftId = [...base.shifts].sort((a, b) => b.startedAt - a.startedAt)[0]?.id;
+      }
       base.salesLog = Array.from(salesById.values()).sort((a, b) => (a.ts || 0) - (b.ts || 0));
       base.meta = {
         lastWriteTs: Math.max(...normalized.map((variant) => Number(variant.meta?.lastWriteTs) || 0), 0),
         deletedSaleIds: Array.from(deletedSaleIds),
+        deletedShiftIds: Array.from(deletedShiftIds),
       };
       return base;
     }
@@ -641,11 +720,11 @@
       }
       if (!data.sales) data.sales = {};
       if (!data.salesLog) data.salesLog = [];
-      if (!data.meta) data.meta = { lastWriteTs: 0, deletedSaleIds: [] };
+      if (!data.meta) data.meta = { lastWriteTs: 0, deletedSaleIds: [], deletedShiftIds: [] };
     }
 
     function saveData({ mergeExisting = true } = {}) {
-      if (!data.meta) data.meta = { lastWriteTs: 0, deletedSaleIds: [] };
+      if (!data.meta) data.meta = { lastWriteTs: 0, deletedSaleIds: [], deletedShiftIds: [] };
       if (mergeExisting) {
         const stored = parseStoredData(localStorage.getItem(STORAGE_KEY));
         data = mergeDataVariants(data, [stored, ...readBackups()]);
@@ -674,6 +753,7 @@
             quantity: counts.cash,
             method: 'cash',
             ts: Date.now(),
+            shiftId: data.currentShiftId,
           });
           migrated = true;
         }
@@ -687,6 +767,7 @@
             quantity: counts.qr,
             method: 'qr',
             ts: Date.now(),
+            shiftId: data.currentShiftId,
           });
           migrated = true;
         }
@@ -743,9 +824,37 @@
       return null;
     }
 
+    function findShift(shiftId) {
+      return data.shifts.find((shift) => shift.id === shiftId) || null;
+    }
+
+    function getShiftSales(shiftId) {
+      return data.salesLog.filter((entry) => entry.shiftId === shiftId);
+    }
+
+    function formatShiftDate(timestamp) {
+      return new Date(timestamp).toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+
+    function formatShiftLabel(shift) {
+      const status = shift.id === data.currentShiftId ? ' · текущая' : '';
+      return `Смена от ${formatShiftDate(shift.startedAt)}${status}`;
+    }
+
+    function formatShiftPeriod(shift) {
+      const end = shift.endedAt ? formatShiftDate(shift.endedAt) : 'сейчас';
+      return `${formatShiftDate(shift.startedAt)} — ${end}`;
+    }
+
     function rebuildSalesCounters() {
       const counters = {};
-      data.salesLog.forEach((entry) => {
+      getShiftSales(data.currentShiftId).forEach((entry) => {
         if (!counters[entry.productId]) counters[entry.productId] = { cash: 0, qr: 0 };
         if (entry.method === 'cash') counters[entry.productId].cash += entry.quantity;
         if (entry.method === 'qr') counters[entry.productId].qr += entry.quantity;
@@ -783,7 +892,7 @@
       const products = category ? category.products : [];
 
       const counters = {};
-      data.salesLog.forEach((entry) => {
+      getShiftSales(data.currentShiftId).forEach((entry) => {
         counters[entry.productId] = counters[entry.productId] || { total: 0 };
         counters[entry.productId].total += entry.quantity;
       });
@@ -879,6 +988,7 @@
           quantity: item.quantity,
           method,
           ts,
+          shiftId: data.currentShiftId,
         });
       });
       rebuildSalesCounters();
@@ -1156,10 +1266,13 @@
                 }))
               : [],
           }));
+          const initialShift = createShift();
           data.categories = sanitizedCategories;
           data.sales = {};
           data.salesLog = [];
-          data.meta = { lastWriteTs: 0, deletedSaleIds: [] };
+          data.shifts = [initialShift];
+          data.currentShiftId = initialShift.id;
+          data.meta = { lastWriteTs: 0, deletedSaleIds: [], deletedShiftIds: [] };
           clearBackups();
           saveData({ mergeExisting: false });
           renderSettings();
@@ -1210,32 +1323,34 @@
     }
 
     // Итоги
-    function computeReport() {
+    function computeReport(shiftId = data.currentShiftId) {
       const productRows = [];
       const categoryTotals = {};
       let cashTotal = 0;
       let qrTotal = 0;
 
       const productAggregates = {};
-      data.categories.forEach((cat) => {
-        cat.products.forEach((prod) => {
-          productAggregates[prod.id] = {
-            category: cat.name,
-            name: prod.name,
-            price: prod.price,
-            cashCount: 0,
-            qrCount: 0,
-            cashSum: 0,
-            qrSum: 0,
-          };
+      if (shiftId === data.currentShiftId) {
+        data.categories.forEach((cat) => {
+          cat.products.forEach((prod) => {
+            productAggregates[prod.id] = {
+              category: cat.name,
+              name: prod.name,
+              price: prod.price,
+              cashCount: 0,
+              qrCount: 0,
+              cashSum: 0,
+              qrSum: 0,
+            };
+          });
         });
-      });
+      }
 
-      data.salesLog.forEach((entry) => {
+      getShiftSales(shiftId).forEach((entry) => {
         const found = findProduct(entry.productId);
-        const categoryName = found?.category.name || entry.categoryName || 'Без категории';
-        const productName = found?.product.name || entry.productName || 'Товар';
-        const displayPrice = found?.product.price ?? entry.price;
+        const categoryName = entry.categoryName || found?.category.name || 'Без категории';
+        const productName = entry.productName || found?.product.name || 'Товар';
+        const displayPrice = entry.price ?? found?.product.price ?? 0;
         if (!productAggregates[entry.productId]) {
           productAggregates[entry.productId] = {
             category: categoryName,
@@ -1327,7 +1442,25 @@
     }
 
     function renderReport() {
-      const { productRows, cashSoldProductRows, qrSoldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
+      const shiftSelect = document.getElementById('report-shift-select');
+      const sortedShifts = [...data.shifts].sort((a, b) => b.startedAt - a.startedAt);
+      if (!selectedReportShiftId || !findShift(selectedReportShiftId)) {
+        selectedReportShiftId = data.currentShiftId;
+      }
+      shiftSelect.innerHTML = sortedShifts
+        .map((shift) => `<option value="${shift.id}">${formatShiftLabel(shift)}</option>`)
+        .join('');
+      shiftSelect.value = selectedReportShiftId;
+
+      const selectedShift = findShift(selectedReportShiftId);
+      if (!selectedShift) return;
+      const shiftSales = getShiftSales(selectedShift.id);
+      document.getElementById('report-shift-info').textContent = `Период: ${formatShiftPeriod(selectedShift)} · операций: ${shiftSales.length}`;
+      document.getElementById('delete-shift').style.display = selectedShift.id === data.currentShiftId ? 'none' : 'inline-flex';
+
+      const { productRows, cashSoldProductRows, qrSoldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport(
+        selectedShift.id
+      );
       const container = document.getElementById('report-summary');
       container.innerHTML = '';
 
@@ -1417,25 +1550,54 @@
       container.appendChild(totalsCard);
     }
 
-    function resetShift() {
-      const ok = confirm('Сбросить все продажи за смену?');
+    function startNewShift() {
+      const currentShift = findShift(data.currentShiftId);
+      const ok = confirm('Завершить текущую смену и начать новую? Продажи останутся в истории.');
       if (!ok) return;
-      data.sales = {};
-      data.salesLog = [];
-      data.meta = { lastWriteTs: 0, deletedSaleIds: [] };
-      clearBackups();
-      saveData({ mergeExisting: false });
+      const startedAt = nextTimestamp();
+      if (currentShift) currentShift.endedAt = startedAt;
+      const newShift = createShift(startedAt);
+      data.shifts.push(newShift);
+      data.currentShiftId = newShift.id;
+      selectedReportShiftId = newShift.id;
+      currentCart = [];
+      rebuildSalesCounters();
+      saveData();
       renderReport();
       renderSales();
       renderOperations();
-      showToast('Смена сброшена');
+      showToast('Новая смена начата');
+    }
+
+    function deleteSelectedShift() {
+      const shift = findShift(selectedReportShiftId);
+      if (!shift || shift.id === data.currentShiftId) return;
+      const ok = confirm(`Удалить смену ${formatShiftPeriod(shift)} и все её продажи? Отменить это действие нельзя.`);
+      if (!ok) return;
+
+      const deletedEntries = getShiftSales(shift.id);
+      if (!Array.isArray(data.meta.deletedShiftIds)) data.meta.deletedShiftIds = [];
+      if (!Array.isArray(data.meta.deletedSaleIds)) data.meta.deletedSaleIds = [];
+      data.meta.deletedShiftIds.push(shift.id);
+      deletedEntries.forEach((entry) => data.meta.deletedSaleIds.push(entry.id));
+      data.shifts = data.shifts.filter((item) => item.id !== shift.id);
+      data.salesLog = data.salesLog.filter((entry) => entry.shiftId !== shift.id);
+      selectedReportShiftId = data.currentShiftId;
+      saveData();
+      renderReport();
+      showToast('Смена удалена');
     }
 
     function downloadReport() {
-      const { productRows, cashSoldProductRows, qrSoldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport();
+      const shift = findShift(selectedReportShiftId) || findShift(data.currentShiftId);
+      if (!shift) return;
+      const { productRows, cashSoldProductRows, qrSoldProductRows, categoryTotals, cashTotal, qrTotal, grandTotal } = computeReport(
+        shift.id
+      );
       const lines = [];
       const now = new Date();
-      lines.push(`Отчёт,${now.toLocaleString('ru-RU')}`);
+      lines.push(`Смена,${formatShiftPeriod(shift)}`);
+      lines.push(`Отчёт сформирован,${now.toLocaleString('ru-RU')}`);
       lines.push('---');
       lines.push('Категория,Товар,Цена,Нал (шт),QR (шт),Всего (шт),Нал (сумма),QR (сумма),Итого');
       productRows.forEach((r) => {
@@ -1468,7 +1630,8 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const fileName = `otchet-${now.toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+      const shiftDate = new Date(shift.startedAt).toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      const fileName = `itogi-smeny-${shiftDate}.csv`;
       a.download = fileName;
       document.body.appendChild(a);
       a.click();
@@ -1529,18 +1692,24 @@
       e.target.value = '';
     };
 
-    document.getElementById('reset-shift').onclick = resetShift;
+    document.getElementById('report-shift-select').onchange = (e) => {
+      selectedReportShiftId = e.target.value;
+      renderReport();
+    };
+    document.getElementById('new-shift').onclick = startNewShift;
+    document.getElementById('delete-shift').onclick = deleteSelectedShift;
     document.getElementById('download-report').onclick = downloadReport;
 
     // Журнал операций
     function renderOperations() {
       const container = document.getElementById('operations-list');
       container.innerHTML = '';
-      if (!data.salesLog.length) {
-        container.innerHTML = '<p class="muted" style="margin:0;">Пока нет продаж</p>';
+      const currentShiftSales = getShiftSales(data.currentShiftId);
+      if (!currentShiftSales.length) {
+        container.innerHTML = '<p class="muted" style="margin:0;">В текущей смене пока нет продаж</p>';
         return;
       }
-      const sorted = [...data.salesLog].sort((a, b) => b.ts - a.ts);
+      const sorted = [...currentShiftSales].sort((a, b) => b.ts - a.ts);
       sorted.forEach((entry) => {
         const row = document.createElement('div');
         row.className = 'category-row';
@@ -1563,7 +1732,7 @@
     function undoOperation(id) {
       const idx = data.salesLog.findIndex((e) => e.id === id);
       if (idx === -1) return;
-      if (!data.meta) data.meta = { lastWriteTs: 0, deletedSaleIds: [] };
+      if (!data.meta) data.meta = { lastWriteTs: 0, deletedSaleIds: [], deletedShiftIds: [] };
       if (!Array.isArray(data.meta.deletedSaleIds)) data.meta.deletedSaleIds = [];
       data.meta.deletedSaleIds.push(id);
       data.salesLog.splice(idx, 1);
