@@ -1,4 +1,4 @@
-const CACHE_NAME = 'church-shop-pwa-v3';
+const CACHE_NAME = 'church-shop-pwa-v4';
 const PRECACHE_URLS = [
   './',
   './index.html',
