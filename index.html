@@ -1256,42 +1256,89 @@
       showToast('Список сохранён');
     }
 
-    function importCatalogFile(file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const parsed = JSON.parse(e.target.result);
-          if (!parsed || !Array.isArray(parsed.categories)) throw new Error('Неверный формат файла');
-          const sanitizedCategories = parsed.categories.map((cat) => ({
-            id: cat.id || generateId('cat'),
-            name: cat.name || 'Без названия',
-            products: Array.isArray(cat.products)
-              ? cat.products.map((p) => ({
-                  id: p.id || generateId('p'),
-                  name: p.name || 'Товар',
-                  price: Number.isFinite(p.price) && p.price > 0 ? Math.round(p.price) : 0,
-                  variablePrice: !!p.variablePrice,
-                }))
-              : [],
-          }));
-          const initialShift = createShift();
-          data.categories = sanitizedCategories;
-          data.sales = {};
-          data.salesLog = [];
-          data.shifts = [initialShift];
-          data.currentShiftId = initialShift.id;
-          data.meta = { lastWriteTs: 0, deletedSaleIds: [], deletedShiftIds: [] };
-          clearBackups();
-          saveData({ mergeExisting: false });
-          renderSettings();
-          renderSales();
-          renderOperations();
-          showToast('Список товаров восстановлен');
-        } catch (err) {
-          alert('Не удалось загрузить файл: ' + err.message);
-        }
+    function readFileAsText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+        reader.onerror = () => {
+          const reason = reader.error?.message || reader.error?.name || 'файл недоступен для чтения';
+          reject(new Error(reason));
+        };
+        reader.onabort = () => reject(new Error('чтение файла отменено'));
+        reader.readAsText(file);
+      });
+    }
+
+    async function readJsonFile(file) {
+      const text = await readFileAsText(file);
+      const normalizedText = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+      return JSON.parse(normalizedText);
+    }
+
+    function countProducts(categories) {
+      return categories.reduce((count, category) => {
+        return count + (Array.isArray(category.products) ? category.products.length : 0);
+      }, 0);
+    }
+
+    function verifyImportedData(expected) {
+      const stored = parseStoredData(localStorage.getItem(STORAGE_KEY));
+      if (!stored) throw new Error('данные не сохранились в памяти приложения');
+      const expectedCounts = {
+        categories: expected.categories.length,
+        products: countProducts(expected.categories),
+        sales: expected.salesLog.length,
+        shifts: expected.shifts.length,
       };
-      reader.readAsText(file);
+      const storedCounts = {
+        categories: stored.categories.length,
+        products: countProducts(stored.categories),
+        sales: stored.salesLog.length,
+        shifts: stored.shifts.length,
+      };
+      if (Object.keys(expectedCounts).some((key) => expectedCounts[key] !== storedCounts[key])) {
+        throw new Error('сохранённые данные не совпадают с импортируемым файлом');
+      }
+      return storedCounts;
+    }
+
+    async function importCatalogFile(file) {
+      try {
+        const parsed = await readJsonFile(file);
+        if (!parsed || !Array.isArray(parsed.categories)) throw new Error('Неверный формат файла');
+        const sanitizedCategories = parsed.categories.map((cat) => ({
+          id: cat.id || generateId('cat'),
+          name: cat.name || 'Без названия',
+          products: Array.isArray(cat.products)
+            ? cat.products.map((p) => ({
+                id: p.id || generateId('p'),
+                name: p.name || 'Товар',
+                price: Number.isFinite(p.price) && p.price > 0 ? Math.round(p.price) : 0,
+                variablePrice: !!p.variablePrice,
+              }))
+            : [],
+        }));
+        const initialShift = createShift();
+        data.categories = sanitizedCategories;
+        data.sales = {};
+        data.salesLog = [];
+        data.shifts = [initialShift];
+        data.currentShiftId = initialShift.id;
+        data.meta = { lastWriteTs: 0, deletedSaleIds: [], deletedShiftIds: [] };
+        currentCategoryId = data.categories[0]?.id || null;
+        selectedReportShiftId = data.currentShiftId;
+        currentCart = [];
+        clearBackups();
+        saveData({ mergeExisting: false });
+        const counts = verifyImportedData(data);
+        renderSettings();
+        renderSales();
+        renderOperations();
+        renderReport();
+        showToast(`Загружено: ${counts.categories} категорий, ${counts.products} товаров`);
+      } catch (err) {
+        alert('Не удалось загрузить файл: ' + err.message);
+      }
     }
 
     function exportAllData() {
@@ -1309,25 +1356,31 @@
       showToast('Все данные сохранены');
     }
 
-    function importAllDataFile(file) {
+    async function importAllDataFile(file) {
       if (!confirm('Импорт всех данных заменит текущий каталог, продажи и журнал операций. Продолжить?')) return;
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const parsed = JSON.parse(e.target.result);
-          if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.categories)) {
-            throw new Error('Неверный формат файла');
-          }
-          const normalized = normalizeDataShape(parsed);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-          clearBackups();
-          showToast('Все данные восстановлены');
-          location.reload();
-        } catch (err) {
-          alert('Не удалось загрузить файл: ' + err.message);
+      try {
+        const parsed = await readJsonFile(file);
+        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.categories)) {
+          throw new Error('Неверный формат файла');
         }
-      };
-      reader.readAsText(file);
+        data = normalizeDataShape(parsed);
+        currentCategoryId = data.categories[0]?.id || null;
+        selectedReportShiftId = data.currentShiftId;
+        currentCart = [];
+        clearBackups();
+        rebuildSalesCounters();
+        saveData({ mergeExisting: false });
+        const counts = verifyImportedData(data);
+        renderSettings();
+        renderSales();
+        renderOperations();
+        renderReport();
+        showToast(
+          `Загружено: ${counts.products} товаров, ${counts.sales} продаж, ${counts.shifts} смен`
+        );
+      } catch (err) {
+        alert('Не удалось загрузить файл: ' + err.message);
+      }
     }
 
     // Итоги
@@ -1679,17 +1732,31 @@
 
     document.getElementById('export-catalog').onclick = exportCatalog;
     document.getElementById('import-catalog').onclick = () => document.getElementById('catalog-file').click();
-    document.getElementById('catalog-file').onchange = (e) => {
-      const [file] = e.target.files || [];
-      if (file) importCatalogFile(file);
-      e.target.value = '';
+    document.getElementById('catalog-file').onchange = async (e) => {
+      const input = e.currentTarget;
+      const [file] = input.files || [];
+      if (!file) return;
+      input.disabled = true;
+      try {
+        await importCatalogFile(file);
+      } finally {
+        input.value = '';
+        input.disabled = false;
+      }
     };
     document.getElementById('export-all-data').onclick = exportAllData;
     document.getElementById('import-all-data').onclick = () => document.getElementById('all-data-file').click();
-    document.getElementById('all-data-file').onchange = (e) => {
-      const [file] = e.target.files || [];
-      if (file) importAllDataFile(file);
-      e.target.value = '';
+    document.getElementById('all-data-file').onchange = async (e) => {
+      const input = e.currentTarget;
+      const [file] = input.files || [];
+      if (!file) return;
+      input.disabled = true;
+      try {
+        await importAllDataFile(file);
+      } finally {
+        input.value = '';
+        input.disabled = false;
+      }
     };
 
     document.getElementById('report-shift-select').onchange = (e) => {
