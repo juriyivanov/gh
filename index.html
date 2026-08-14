@@ -1736,12 +1736,10 @@
       const input = e.currentTarget;
       const [file] = input.files || [];
       if (!file) return;
-      input.disabled = true;
       try {
         await importCatalogFile(file);
       } finally {
         input.value = '';
-        input.disabled = false;
       }
     };
     document.getElementById('export-all-data').onclick = exportAllData;
@@ -1750,12 +1748,10 @@
       const input = e.currentTarget;
       const [file] = input.files || [];
       if (!file) return;
-      input.disabled = true;
       try {
         await importAllDataFile(file);
       } finally {
         input.value = '';
-        input.disabled = false;
       }
     };
 
