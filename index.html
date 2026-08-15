@@ -301,6 +301,22 @@
       flex-wrap: wrap;
     }
 
+    .file-picker {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .file-picker input[type="file"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      padding: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -419,18 +435,22 @@
         <p class="muted" style="margin-top:0;">Сохраните список категорий и товаров в файл или загрузите ранее сохранённый.</p>
         <div class="actions" style="margin-top:8px; gap:8px;">
           <button class="btn btn-ghost" id="export-catalog">Сохранить список</button>
-          <button class="btn btn-primary" id="import-catalog">Загрузить список</button>
+          <label class="btn btn-primary file-picker">
+            Загрузить список
+            <input type="file" id="catalog-file" aria-label="Загрузить список товаров" />
+          </label>
         </div>
-        <input type="file" id="catalog-file" accept="application/json" style="display:none;" />
       </div>
       <div class="card">
         <h2>Резервное копирование всех данных</h2>
         <p class="muted" style="margin-top:0;">Сохраните или восстановите полный набор данных приложения: каталог, смены, продажи, журнал операций и служебные метки.</p>
         <div class="actions" style="margin-top:8px; gap:8px;">
           <button class="btn btn-ghost" id="export-all-data">Экспорт всех данных</button>
-          <button class="btn btn-primary" id="import-all-data">Импорт всех данных</button>
+          <label class="btn btn-primary file-picker">
+            Импорт всех данных
+            <input type="file" id="all-data-file" aria-label="Импорт всех данных" />
+          </label>
         </div>
-        <input type="file" id="all-data-file" accept="application/json" style="display:none;" />
       </div>
     </section>
 
@@ -1383,6 +1403,34 @@
       }
     }
 
+    function bindFileImport(inputId, importFile) {
+      const input = document.getElementById(inputId);
+      let importInProgress = false;
+
+      const handleSelectedFile = async () => {
+        if (importInProgress) return;
+        const [file] = input.files || [];
+        if (!file) {
+          showToast('Файл не получен от файлового менеджера');
+          return;
+        }
+
+        importInProgress = true;
+        showToast(`Файл выбран: ${file.name || 'без имени'}. Начинаю импорт`);
+        try {
+          await importFile(file);
+        } finally {
+          input.value = '';
+          importInProgress = false;
+        }
+      };
+
+      // Обычно браузеры посылают оба события. Флаг защищает от двойного импорта,
+      // а два обработчика нужны для Android WebView, где может прийти только одно из них.
+      input.addEventListener('input', handleSelectedFile);
+      input.addEventListener('change', handleSelectedFile);
+    }
+
     // Итоги
     function computeReport(shiftId = data.currentShiftId) {
       const productRows = [];
@@ -1731,29 +1779,9 @@
     };
 
     document.getElementById('export-catalog').onclick = exportCatalog;
-    document.getElementById('import-catalog').onclick = () => document.getElementById('catalog-file').click();
-    document.getElementById('catalog-file').onchange = async (e) => {
-      const input = e.currentTarget;
-      const [file] = input.files || [];
-      if (!file) return;
-      try {
-        await importCatalogFile(file);
-      } finally {
-        input.value = '';
-      }
-    };
+    bindFileImport('catalog-file', importCatalogFile);
     document.getElementById('export-all-data').onclick = exportAllData;
-    document.getElementById('import-all-data').onclick = () => document.getElementById('all-data-file').click();
-    document.getElementById('all-data-file').onchange = async (e) => {
-      const input = e.currentTarget;
-      const [file] = input.files || [];
-      if (!file) return;
-      try {
-        await importAllDataFile(file);
-      } finally {
-        input.value = '';
-      }
-    };
+    bindFileImport('all-data-file', importAllDataFile);
 
     document.getElementById('report-shift-select').onchange = (e) => {
       selectedReportShiftId = e.target.value;
