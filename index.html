@@ -301,6 +301,29 @@
       flex-wrap: wrap;
     }
 
+    .file-picker {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .file-picker input[type="file"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      padding: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .app-version {
+      margin: 16px 0 4px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -419,19 +442,25 @@
         <p class="muted" style="margin-top:0;">Сохраните список категорий и товаров в файл или загрузите ранее сохранённый.</p>
         <div class="actions" style="margin-top:8px; gap:8px;">
           <button class="btn btn-ghost" id="export-catalog">Сохранить список</button>
-          <button class="btn btn-primary" id="import-catalog">Загрузить список</button>
+          <label class="btn btn-primary file-picker">
+            Загрузить список
+            <input type="file" id="catalog-file" aria-label="Загрузить список товаров" />
+          </label>
         </div>
-        <input type="file" id="catalog-file" accept="application/json" style="display:none;" />
       </div>
       <div class="card">
         <h2>Резервное копирование всех данных</h2>
         <p class="muted" style="margin-top:0;">Сохраните или восстановите полный набор данных приложения: каталог, смены, продажи, журнал операций и служебные метки.</p>
         <div class="actions" style="margin-top:8px; gap:8px;">
           <button class="btn btn-ghost" id="export-all-data">Экспорт всех данных</button>
-          <button class="btn btn-primary" id="import-all-data">Импорт всех данных</button>
+          <label class="btn btn-primary file-picker">
+            Импорт всех данных
+            <input type="file" id="all-data-file" aria-label="Импорт всех данных" />
+          </label>
         </div>
-        <input type="file" id="all-data-file" accept="application/json" style="display:none;" />
       </div>
+      <!-- При изменении приложения обновить также CACHE_NAME в sw.js. -->
+      <p class="app-version">Версия 1.0.0</p>
     </section>
 
     <!-- Экран отчёта -->
@@ -1256,42 +1285,89 @@
       showToast('Список сохранён');
     }
 
-    function importCatalogFile(file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const parsed = JSON.parse(e.target.result);
-          if (!parsed || !Array.isArray(parsed.categories)) throw new Error('Неверный формат файла');
-          const sanitizedCategories = parsed.categories.map((cat) => ({
-            id: cat.id || generateId('cat'),
-            name: cat.name || 'Без названия',
-            products: Array.isArray(cat.products)
-              ? cat.products.map((p) => ({
-                  id: p.id || generateId('p'),
-                  name: p.name || 'Товар',
-                  price: Number.isFinite(p.price) && p.price > 0 ? Math.round(p.price) : 0,
-                  variablePrice: !!p.variablePrice,
-                }))
-              : [],
-          }));
-          const initialShift = createShift();
-          data.categories = sanitizedCategories;
-          data.sales = {};
-          data.salesLog = [];
-          data.shifts = [initialShift];
-          data.currentShiftId = initialShift.id;
-          data.meta = { lastWriteTs: 0, deletedSaleIds: [], deletedShiftIds: [] };
-          clearBackups();
-          saveData({ mergeExisting: false });
-          renderSettings();
-          renderSales();
-          renderOperations();
-          showToast('Список товаров восстановлен');
-        } catch (err) {
-          alert('Не удалось загрузить файл: ' + err.message);
-        }
+    function readFileAsText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+        reader.onerror = () => {
+          const reason = reader.error?.message || reader.error?.name || 'файл недоступен для чтения';
+          reject(new Error(reason));
+        };
+        reader.onabort = () => reject(new Error('чтение файла отменено'));
+        reader.readAsText(file);
+      });
+    }
+
+    async function readJsonFile(file) {
+      const text = await readFileAsText(file);
+      const normalizedText = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+      return JSON.parse(normalizedText);
+    }
+
+    function countProducts(categories) {
+      return categories.reduce((count, category) => {
+        return count + (Array.isArray(category.products) ? category.products.length : 0);
+      }, 0);
+    }
+
+    function verifyImportedData(expected) {
+      const stored = parseStoredData(localStorage.getItem(STORAGE_KEY));
+      if (!stored) throw new Error('данные не сохранились в памяти приложения');
+      const expectedCounts = {
+        categories: expected.categories.length,
+        products: countProducts(expected.categories),
+        sales: expected.salesLog.length,
+        shifts: expected.shifts.length,
       };
-      reader.readAsText(file);
+      const storedCounts = {
+        categories: stored.categories.length,
+        products: countProducts(stored.categories),
+        sales: stored.salesLog.length,
+        shifts: stored.shifts.length,
+      };
+      if (Object.keys(expectedCounts).some((key) => expectedCounts[key] !== storedCounts[key])) {
+        throw new Error('сохранённые данные не совпадают с импортируемым файлом');
+      }
+      return storedCounts;
+    }
+
+    async function importCatalogFile(file) {
+      try {
+        const parsed = await readJsonFile(file);
+        if (!parsed || !Array.isArray(parsed.categories)) throw new Error('Неверный формат файла');
+        const sanitizedCategories = parsed.categories.map((cat) => ({
+          id: cat.id || generateId('cat'),
+          name: cat.name || 'Без названия',
+          products: Array.isArray(cat.products)
+            ? cat.products.map((p) => ({
+                id: p.id || generateId('p'),
+                name: p.name || 'Товар',
+                price: Number.isFinite(p.price) && p.price > 0 ? Math.round(p.price) : 0,
+                variablePrice: !!p.variablePrice,
+              }))
+            : [],
+        }));
+        const initialShift = createShift();
+        data.categories = sanitizedCategories;
+        data.sales = {};
+        data.salesLog = [];
+        data.shifts = [initialShift];
+        data.currentShiftId = initialShift.id;
+        data.meta = { lastWriteTs: 0, deletedSaleIds: [], deletedShiftIds: [] };
+        currentCategoryId = data.categories[0]?.id || null;
+        selectedReportShiftId = data.currentShiftId;
+        currentCart = [];
+        clearBackups();
+        saveData({ mergeExisting: false });
+        const counts = verifyImportedData(data);
+        renderSettings();
+        renderSales();
+        renderOperations();
+        renderReport();
+        showToast(`Загружено: ${counts.categories} категорий, ${counts.products} товаров`);
+      } catch (err) {
+        alert('Не удалось загрузить файл: ' + err.message);
+      }
     }
 
     function exportAllData() {
@@ -1309,25 +1385,110 @@
       showToast('Все данные сохранены');
     }
 
-    function importAllDataFile(file) {
+    async function importAllDataFile(file) {
       if (!confirm('Импорт всех данных заменит текущий каталог, продажи и журнал операций. Продолжить?')) return;
-      const reader = new FileReader();
-      reader.onload = (e) => {
+      try {
+        const parsed = await readJsonFile(file);
+        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.categories)) {
+          throw new Error('Неверный формат файла');
+        }
+        data = normalizeDataShape(parsed);
+        currentCategoryId = data.categories[0]?.id || null;
+        selectedReportShiftId = data.currentShiftId;
+        currentCart = [];
+        clearBackups();
+        rebuildSalesCounters();
+        saveData({ mergeExisting: false });
+        const counts = verifyImportedData(data);
+        renderSettings();
+        renderSales();
+        renderOperations();
+        renderReport();
+        showToast(
+          `Загружено: ${counts.products} товаров, ${counts.sales} продаж, ${counts.shifts} смен`
+        );
+      } catch (err) {
+        alert('Не удалось загрузить файл: ' + err.message);
+      }
+    }
+
+    function bindFileImport(inputId, importFile) {
+      const input = document.getElementById(inputId);
+      let importInProgress = false;
+      let waitingForLegacyPicker = false;
+      let pollTimer = null;
+      let pollTimeout = null;
+
+      const stopLegacyPolling = () => {
+        waitingForLegacyPicker = false;
+        if (pollTimer) clearInterval(pollTimer);
+        if (pollTimeout) clearTimeout(pollTimeout);
+        pollTimer = null;
+        pollTimeout = null;
+      };
+
+      const processFile = async (file, pickerName) => {
+        if (!file || importInProgress) return false;
+        stopLegacyPolling();
+        importInProgress = true;
+        showToast(`Файл получен (${pickerName}): ${file.name || 'без имени'}`);
         try {
-          const parsed = JSON.parse(e.target.result);
-          if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.categories)) {
-            throw new Error('Неверный формат файла');
-          }
-          const normalized = normalizeDataShape(parsed);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-          clearBackups();
-          showToast('Все данные восстановлены');
-          location.reload();
+          await importFile(file);
+        } finally {
+          input.value = '';
+          importInProgress = false;
+        }
+        return true;
+      };
+
+      const checkLegacyInput = () => {
+        const [file] = input.files || [];
+        if (file) processFile(file, 'совместимый режим');
+      };
+
+      const startLegacyPolling = () => {
+        stopLegacyPolling();
+        waitingForLegacyPicker = true;
+        showToast('Выбор файла: совместимый режим');
+        pollTimer = setInterval(checkLegacyInput, 300);
+        pollTimeout = setTimeout(() => {
+          stopLegacyPolling();
+          showToast('Файловый менеджер не вернул файл');
+        }, 120000);
+      };
+
+      const openModernPicker = async (event) => {
+        if (typeof window.showOpenFilePicker !== 'function' || !window.isSecureContext) {
+          startLegacyPolling();
+          return;
+        }
+
+        // Не даём input открыть второй picker: файл будет получен напрямую из handle.
+        event.preventDefault();
+        if (importInProgress) return;
+        try {
+          showToast('Выбор файла: новый Android API');
+          const [handle] = await window.showOpenFilePicker({ multiple: false });
+          const file = await handle.getFile();
+          await processFile(file, 'новый Android API');
         } catch (err) {
-          alert('Не удалось загрузить файл: ' + err.message);
+          if (err?.name !== 'AbortError') {
+            alert('Не удалось выбрать файл: ' + (err?.message || err?.name || 'неизвестная ошибка'));
+          }
         }
       };
-      reader.readAsText(file);
+
+      input.addEventListener('click', openModernPicker);
+      input.addEventListener('input', checkLegacyInput);
+      input.addEventListener('change', checkLegacyInput);
+      window.addEventListener('focus', () => {
+        if (waitingForLegacyPicker) setTimeout(checkLegacyInput, 300);
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (waitingForLegacyPicker && document.visibilityState === 'visible') {
+          setTimeout(checkLegacyInput, 300);
+        }
+      });
     }
 
     // Итоги
@@ -1678,19 +1839,9 @@
     };
 
     document.getElementById('export-catalog').onclick = exportCatalog;
-    document.getElementById('import-catalog').onclick = () => document.getElementById('catalog-file').click();
-    document.getElementById('catalog-file').onchange = (e) => {
-      const [file] = e.target.files || [];
-      if (file) importCatalogFile(file);
-      e.target.value = '';
-    };
+    bindFileImport('catalog-file', importCatalogFile);
     document.getElementById('export-all-data').onclick = exportAllData;
-    document.getElementById('import-all-data').onclick = () => document.getElementById('all-data-file').click();
-    document.getElementById('all-data-file').onchange = (e) => {
-      const [file] = e.target.files || [];
-      if (file) importAllDataFile(file);
-      e.target.value = '';
-    };
+    bindFileImport('all-data-file', importAllDataFile);
 
     document.getElementById('report-shift-select').onchange = (e) => {
       selectedReportShiftId = e.target.value;
