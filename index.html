@@ -1406,29 +1406,80 @@
     function bindFileImport(inputId, importFile) {
       const input = document.getElementById(inputId);
       let importInProgress = false;
+      let waitingForLegacyPicker = false;
+      let pollTimer = null;
+      let pollTimeout = null;
 
-      const handleSelectedFile = async () => {
-        if (importInProgress) return;
-        const [file] = input.files || [];
-        if (!file) {
-          showToast('Файл не получен от файлового менеджера');
-          return;
-        }
+      const stopLegacyPolling = () => {
+        waitingForLegacyPicker = false;
+        if (pollTimer) clearInterval(pollTimer);
+        if (pollTimeout) clearTimeout(pollTimeout);
+        pollTimer = null;
+        pollTimeout = null;
+      };
 
+      const processFile = async (file, pickerName) => {
+        if (!file || importInProgress) return false;
+        stopLegacyPolling();
         importInProgress = true;
-        showToast(`Файл выбран: ${file.name || 'без имени'}. Начинаю импорт`);
+        showToast(`Файл получен (${pickerName}): ${file.name || 'без имени'}`);
         try {
           await importFile(file);
         } finally {
           input.value = '';
           importInProgress = false;
         }
+        return true;
       };
 
-      // Обычно браузеры посылают оба события. Флаг защищает от двойного импорта,
-      // а два обработчика нужны для Android WebView, где может прийти только одно из них.
-      input.addEventListener('input', handleSelectedFile);
-      input.addEventListener('change', handleSelectedFile);
+      const checkLegacyInput = () => {
+        const [file] = input.files || [];
+        if (file) processFile(file, 'совместимый режим');
+      };
+
+      const startLegacyPolling = () => {
+        stopLegacyPolling();
+        waitingForLegacyPicker = true;
+        showToast('Выбор файла: совместимый режим');
+        pollTimer = setInterval(checkLegacyInput, 300);
+        pollTimeout = setTimeout(() => {
+          stopLegacyPolling();
+          showToast('Файловый менеджер не вернул файл');
+        }, 120000);
+      };
+
+      const openModernPicker = async (event) => {
+        if (typeof window.showOpenFilePicker !== 'function' || !window.isSecureContext) {
+          startLegacyPolling();
+          return;
+        }
+
+        // Не даём input открыть второй picker: файл будет получен напрямую из handle.
+        event.preventDefault();
+        if (importInProgress) return;
+        try {
+          showToast('Выбор файла: новый Android API');
+          const [handle] = await window.showOpenFilePicker({ multiple: false });
+          const file = await handle.getFile();
+          await processFile(file, 'новый Android API');
+        } catch (err) {
+          if (err?.name !== 'AbortError') {
+            alert('Не удалось выбрать файл: ' + (err?.message || err?.name || 'неизвестная ошибка'));
+          }
+        }
+      };
+
+      input.addEventListener('click', openModernPicker);
+      input.addEventListener('input', checkLegacyInput);
+      input.addEventListener('change', checkLegacyInput);
+      window.addEventListener('focus', () => {
+        if (waitingForLegacyPicker) setTimeout(checkLegacyInput, 300);
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (waitingForLegacyPicker && document.visibilityState === 'visible') {
+          setTimeout(checkLegacyInput, 300);
+        }
+      });
     }
 
     // Итоги
