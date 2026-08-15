@@ -1,4 +1,5 @@
-const CACHE_NAME = 'church-shop-pwa-v6';
+// Номер должен совпадать с версией, показанной внизу экрана «Настройки».
+const CACHE_NAME = 'church-shop-pwa-v1.0.0';
 const PRECACHE_URLS = [
   './',
   './index.html',
