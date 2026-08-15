@@ -317,6 +317,13 @@
       cursor: pointer;
     }
 
+    .app-version {
+      margin: 16px 0 4px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -452,6 +459,8 @@
           </label>
         </div>
       </div>
+      <!-- При изменении приложения обновить также CACHE_NAME в sw.js. -->
+      <p class="app-version">Версия 1.0.0</p>
     </section>
 
     <!-- Экран отчёта -->
